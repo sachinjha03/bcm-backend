@@ -103,7 +103,7 @@ router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, r
         const data = await BiaData.find({
             $or: [
                 { userId },
-                { company: req.user.company, department: req.user.department } // Optional role-based condition
+                { company: req.user.company, department: req.user.department , module : req.user.module } // Optional role-based condition
             ]
         });
 
