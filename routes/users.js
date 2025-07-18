@@ -7,30 +7,34 @@ const JWT_SECRET = "DevelopedBySachinJha"
 
 router.post("/create-user", async (req, res) => {
   try {
+    const email = req.body.email.toLowerCase();
+
+    // Check if user already exists
+    const isUserExist = await User.findOne({ email });
+    if (isUserExist) {
+      return res.status(400).json({ success: false, reason: "Email already exists." });
+    }
+
+    // Hash password
     const hashedPassword = await bcrypt.hash(req.body.password, 10);
+
+    // Create new user
     const createUser = new User({
       name: req.body.name,
-      email: req.body.email.toLowerCase(), // normalize email
+      email, // already lowercased
       password: hashedPassword,
       role: req.body.role,
       department: req.body.department,
       company: req.body.company,
       module: req.body.module
     });
-    const isUserExist = User.findOne({email:req.body.email})
-    if(!isUserExist){
-      const response = await createUser.save();
-      res.status(200).json({ success: true, data: response });
-    }else{
-      res.status(400).json({success:false , reason:"Email Already Exists"})
-    }
+
+    const response = await createUser.save();
+    res.status(200).json({ success: true, data: response });
 
   } catch (err) {
-    if (err.code === 11000 && err.keyPattern?.email) {
-      res.status(400).json({ success: false, reason: "Email already exists." });
-    } else {
-      res.status(400).json({ success: false, reason: err.message });
-    }
+    // Fallback for any unexpected errors
+    res.status(400).json({ success: false, reason: err.message });
   }
 });
 
