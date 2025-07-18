@@ -6,23 +6,29 @@ const jwt = require("jsonwebtoken")
 const JWT_SECRET = "DevelopedBySachinJha"
 
 router.post("/create-user", async (req, res) => {
-    const hashedPassword = await bcrypt.hash(req.body.password , 10)
-    try {
-        const createUser = new User({
-            name: req.body.name,
-            email: req.body.email,
-            password: hashedPassword,
-            role: req.body.role,
-            department: req.body.department,
-            company : req.body.company,
-            module : req.body.module
-        })
-        const response = await createUser.save();
-        res.status(200).json({success:true , data:response})
-    } catch (err) {
-        res.status(400).json({ success: false, reason: err })
+  try {
+    const hashedPassword = await bcrypt.hash(req.body.password, 10);
+    const createUser = new User({
+      name: req.body.name,
+      email: req.body.email.toLowerCase(), // normalize email
+      password: hashedPassword,
+      role: req.body.role,
+      department: req.body.department,
+      company: req.body.company,
+      module: req.body.module
+    });
+
+    const response = await createUser.save();
+    res.status(200).json({ success: true, data: response });
+
+  } catch (err) {
+    if (err.code === 11000 && err.keyPattern?.email) {
+      res.status(400).json({ success: false, reason: "Email already exists." });
+    } else {
+      res.status(400).json({ success: false, reason: err.message });
     }
-})
+  }
+});
 
 
 router.post("/login", async (req, res) => {
