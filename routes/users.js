@@ -17,9 +17,13 @@ router.post("/create-user", async (req, res) => {
       company: req.body.company,
       module: req.body.module
     });
-
-    const response = await createUser.save();
-    res.status(200).json({ success: true, data: response });
+    const isUserExist = User.findOne({email:req.body.email})
+    if(!isUserExist){
+      const response = await createUser.save();
+      res.status(200).json({ success: true, data: response });
+    }else{
+      res.status(400).json({success:false , reason:"Email Already Exists"})
+    }
 
   } catch (err) {
     if (err.code === 11000 && err.keyPattern?.email) {
