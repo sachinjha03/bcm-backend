@@ -6,7 +6,11 @@ const cors = require('cors')
 const PORT = process.env.port || 8000
 const app = express();
 app.use(express.json())
-app.use(cors())
+// app.use(cors())
+app.use(cors({
+  origin: "http://localhost:3000", // allow frontend origin
+  credentials: true,               // if you're using cookies or auth headers
+}));
 
 app.use("/api" , require("./routes/users"))
 app.use("/api" , require("./routes/riskAssessmentData"))
