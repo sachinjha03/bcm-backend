@@ -16,7 +16,7 @@ const BiaDataSchema = new Schema({
   approvedBy: String,
   finalApprovedBy: String,
   lastEditedBy: {
-    type: String,
+    type: mongoose.Schema.Types.Mixed,
     default: null
   },
 

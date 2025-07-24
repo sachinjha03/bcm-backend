@@ -5,15 +5,54 @@ const bcrypt = require('bcrypt')
 const jwt = require("jsonwebtoken")
 const JWT_SECRET = "DevelopedBySachinJha"
 
+
+
+router.post("/create-multiple-users", async (req, res) => {
+  try {
+    const users = req.body.users;
+
+    if (!Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ success: false, reason: "No users provided." });
+    }
+
+    const newUsers = [];
+
+    for (let user of users) {
+      const email = user.email.toLowerCase().trim();
+
+      const hashedPassword = await bcrypt.hash(user.password, 10);
+
+      newUsers.push({
+        name: user.name.trim(),
+        email,
+        password: hashedPassword,
+        role: user.role,
+        department: user.department,
+        company: user.company,
+        module: user.module || "", 
+      });
+    }
+
+
+    const created = await User.insertMany(newUsers);
+    res.status(200).json({ success: true, message: "Users created successfully", data: created });
+
+  } catch (err) {
+    console.error("Error creating users:", err);
+    res.status(500).json({ success: false, reason: err.message });
+  }
+});
+
+
 router.post("/create-user", async (req, res) => {
   try {
     const email = req.body.email.toLowerCase();
 
     // Check if user already exists
-    const isUserExist = await User.findOne({ email });
-    if (isUserExist) {
-      return res.status(400).json({ success: false, reason: "Email already exists." });
-    }
+    // const isUserExist = await User.findOne({ email });
+    // if (isUserExist) {
+    //   return res.status(400).json({ success: false, reason: "Email already exists." });
+    // }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(req.body.password, 10);

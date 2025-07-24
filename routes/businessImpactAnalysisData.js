@@ -69,29 +69,42 @@ router.delete("/delete-business-impact-analysis-data/:id", verifyToken, async (r
 
 // PUT /api/update-business-impact-analysis-data/:id
 router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
-  try {
-    const { currentStatus, lastEditedBy, approvedBy, finalApprovedBy, formData } = req.body;
+    try {
+        const { currentStatus, lastEditedBy, approvedBy, finalApprovedBy, formData } = req.body;
 
-    const updateData = {
-      currentStatus,
-      lastEditedBy,
-    };
+        const updateData = {
+            currentStatus,
+            lastEditedBy,
+        };
 
-    if (approvedBy) updateData.approvedBy = approvedBy;
-    if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
-    if (formData) updateData.formData = formData; // ✅ include formData
+        if (lastEditedBy && lastEditedBy.email) {
+            const now = new Date();
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = now.getFullYear();
 
-    const updated = await BiaData.findByIdAndUpdate(
-      req.params.id,
-      { $set: updateData },
-      { new: true }
-    );
+            updateData.lastEditedBy = {
+                email: lastEditedBy.email,
+                date: `${day}/${month}/${year}`,
+                time: now.toLocaleTimeString()
+            };
+        }
 
-    res.json({ success: true, data: updated });
-  } catch (err) {
-    console.error("Update BIA error:", err);
-    res.status(500).json({ success: false, message: "Server Error" });
-  }
+        if (approvedBy) updateData.approvedBy = approvedBy;
+        if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
+        if (formData) updateData.formData = formData; // ✅ include formData
+
+        const updated = await BiaData.findByIdAndUpdate(
+            req.params.id,
+            { $set: updateData },
+            { new: true }
+        );
+
+        res.json({ success: true, data: updated });
+    } catch (err) {
+        console.error("Update BIA error:", err);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
 });
 
 
@@ -103,7 +116,7 @@ router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, r
         const data = await BiaData.find({
             $or: [
                 { userId },
-                { company: req.user.company, department: req.user.department , module : req.user.module } // Optional role-based condition
+                { company: req.user.company, department: req.user.department, module: req.user.module } 
             ]
         });
 

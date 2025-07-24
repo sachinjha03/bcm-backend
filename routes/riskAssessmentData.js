@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const RiskAssessmentData = require('../models/RiskAssessmentData');
-const User = require('../models/User'); 
+const User = require('../models/User');
 const verifyToken = require("../middleware/verifyToken")
 
 
@@ -17,7 +17,7 @@ const generateDataId = (length = 8) => {
 };
 
 // POST: Add new risk assessment data
-router.post('/add-risk-assessment-data',verifyToken ,  async (req, res) => {
+router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
   const {
     risks,
     definition,
@@ -69,7 +69,7 @@ router.post('/add-risk-assessment-data',verifyToken ,  async (req, res) => {
 });
 
 // GET: Read all risk assessment data
-router.get('/read-all-risk-assessment-data' , verifyToken , async (req, res) => {
+router.get('/read-all-risk-assessment-data', verifyToken, async (req, res) => {
   try {
     const response = await RiskAssessmentData.find().populate('userId', 'name email role department company');
     res.status(200).json({ success: true, data: response });
@@ -113,7 +113,7 @@ router.get('/read-risk-assessment-data/:userId', verifyToken, async (req, res) =
 
 
 // DELETE: DELETE RISK DATA
-router.delete('/delete-risk-assessment-data/:id' , verifyToken, async (req, res) => {
+router.delete('/delete-risk-assessment-data/:id', verifyToken, async (req, res) => {
   const id = req.params.id;
   try {
     const isDataExist = await RiskAssessmentData.findById(id); // await this
@@ -129,13 +129,67 @@ router.delete('/delete-risk-assessment-data/:id' , verifyToken, async (req, res)
   }
 });
 
+
 // Update Risk Assessment Data
 router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => {
   try {
-    const {risks,definition,category,likelihood,impact,riskScore,existingControl,control,residualRisk,mitigationPlan,riskOwner,currentStatus,lastEditedBy,approvedBy,finalApprovedBy} = req.body;
+    const {
+      risks,
+      definition,
+      category,
+      likelihood,
+      impact,
+      riskScore,
+      existingControl,
+      control,
+      residualRisk,
+      mitigationPlan,
+      riskOwner,
+      currentStatus,
+      lastEditedBy,
+      approvedBy,
+      finalApprovedBy
+    } = req.body;
+
+    const userRole = req.user.role;
+    const isEditingData =
+      risks !== undefined || definition !== undefined || category !== undefined ||
+      likelihood !== undefined || impact !== undefined || riskScore !== undefined ||
+      existingControl !== undefined || control !== undefined || residualRisk !== undefined ||
+      mitigationPlan !== undefined || riskOwner !== undefined;
 
     const updateData = {
-      risks,definition,category,likelihood,impact,riskScore,existingControl,control,residualRisk,mitigationPlan,riskOwner,currentStatus,lastEditedBy,};
+      currentStatus,
+    };
+
+    if (risks !== undefined) updateData.risks = risks;
+    if (definition !== undefined) updateData.definition = definition;
+    if (category !== undefined) updateData.category = category;
+    if (likelihood !== undefined) updateData.likelihood = likelihood;
+    if (impact !== undefined) updateData.impact = impact;
+    if (riskScore !== undefined) updateData.riskScore = riskScore;
+    if (existingControl !== undefined) updateData.existingControl = existingControl;
+    if (control !== undefined) updateData.control = control;
+    if (residualRisk !== undefined) updateData.residualRisk = residualRisk;
+    if (mitigationPlan !== undefined) updateData.mitigationPlan = mitigationPlan;
+    if (riskOwner !== undefined) updateData.riskOwner = riskOwner;
+
+    if ((userRole === "champion" || userRole === "owner") && isEditingData && lastEditedBy) {
+      const now = new Date();
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = now.getFullYear();
+
+      // updateData["lastEditedBy.email"] = lastEditedBy.email;
+      // updateData["lastEditedBy.date"] = `${day}/${month}/${year}`;
+      // updateData["lastEditedBy.time"] = now.toLocaleTimeString();
+      updateData.lastEditedBy = {
+        email: lastEditedBy.email,
+        date: `${day}/${month}/${year}`,
+        time: now.toLocaleTimeString()
+      };
+    }
+
 
     if (approvedBy) updateData.approvedBy = approvedBy;
     if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
@@ -147,6 +201,7 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     );
 
     res.json({ success: true, data: updated });
+
   } catch (err) {
     console.error("Update error:", err);
     res.status(500).json({ success: false, message: "Server Error" });
@@ -157,3 +212,39 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
 
 
 module.exports = router;
+
+
+
+
+
+
+
+
+
+// Update Risk Assessment Data
+// router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => {
+//   try {
+//     const {risks,definition,category,likelihood,impact,riskScore,existingControl,control,residualRisk,mitigationPlan,riskOwner,currentStatus,lastEditedBy,approvedBy,finalApprovedBy} = req.body;
+
+//     const updateData = {
+//       risks,definition,category,likelihood,impact,riskScore,existingControl,control,residualRisk,mitigationPlan,riskOwner,currentStatus,lastEditedBy,};
+
+//     if (approvedBy) updateData.approvedBy = approvedBy;
+//     if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
+
+//     const updated = await RiskAssessmentData.findByIdAndUpdate(
+//       req.params.id,
+//       { $set: updateData },
+//       { new: true }
+//     );
+
+//     res.json({ success: true, data: updated });
+//   } catch (err) {
+//     console.error("Update error:", err);
+//     res.status(500).json({ success: false, message: "Server Error" });
+//   }
+// });
+
+
+
+
