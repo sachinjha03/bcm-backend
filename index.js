@@ -8,8 +8,8 @@ const app = express();
 app.use(express.json())
 // app.use(cors())
 app.use(cors({
-  origin: ["http://localhost:3000", "https://foulath.vercel.app"], // allow both origins
-  credentials: true, // if you're using cookies or auth headers
+  origin: ["http://localhost:3000", "https://foulath.vercel.app"],
+  credentials: true,
 }));
 
 app.use("/api" , require("./routes/users"))
