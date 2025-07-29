@@ -72,26 +72,31 @@ router.post("/login", async (req, res) => {
 router.put("/forgot-password", async (req, res) => {
   try {
     const { email, password } = req.body;
+    const sanitizedEmail = email.toLowerCase().trim();
 
-    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
-    if (!existingUser) {
+    const existingUsers = await User.find({ email: sanitizedEmail });
+
+    if (!existingUsers || existingUsers.length === 0) {
       return res.status(404).json({ success: false, reason: "User not found" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const updatedUser = await User.findByIdAndUpdate(
-      existingUser._id,
-      { $set: { password: hashedPassword } },
-      { new: true }
+    const result = await User.updateMany(
+      { email: sanitizedEmail },
+      { $set: { password: hashedPassword } }
     );
 
-    res.status(200).json({ success: true, message: "Password updated successfully", data: updatedUser });
+    res.status(200).json({
+      success: true,
+      message: `Password updated for ${result.modifiedCount} user(s) with email ${sanitizedEmail}`,
+    });
   } catch (err) {
     console.error("Forgot Password Error:", err);
     res.status(500).json({ success: false, reason: "Server error during forgot password" });
   }
 });
+
 
 
 module.exports = router;
