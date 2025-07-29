@@ -98,5 +98,10 @@ router.put("/forgot-password", async (req, res) => {
 });
 
 
+router.get("/read-all-user" , async(req,res) => {
+  const response = await User.find();
+  res.status(200).json({success:true , data:response})
+})
+
 
 module.exports = router;

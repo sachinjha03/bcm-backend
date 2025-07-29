@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const BiaData = require('../models/BusinessImpactAnalysisData');
 const verifyToken = require('../middleware/verifyToken');
+const User = require('../models/User');
+
 
 // Utility to generate a unique dataId
 const generateDataId = (length = 8) => {
@@ -108,24 +110,73 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
 });
 
 
-// READ BUSINESS IMPACT ANALYSIS DATA FOR A PARTICULAR USER
 router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
-    try {
-        const userId = req.params.id;
+  try {
+    const userId = req.params.id;
 
-        const data = await BiaData.find({
-            $or: [
-                { userId },
-                { company: req.user.company, department: req.user.department, module: req.user.module } 
-            ]
-        });
-
-        res.status(200).json({ success: true, data });
-    } catch (error) {
-        console.error("Fetch error:", error);
-        res.status(500).json({ success: false, message: "Server error" });
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, reason: "User not found" });
     }
+
+    let data;
+
+    if (user.role === "owner" || user.role === "admin") {
+      // Fetch data created by others with the same company, department, and module
+      data = await BiaData.find({
+        company: user.company,
+        department: user.department,
+        module: user.module,
+        createdBy: { $ne: user.email } // Optional: exclude their own data
+      }).populate('userId', 'name email role department company');
+    } else {
+      // Fetch only data created by the user
+      data = await BiaData.find({ userId })
+        .populate('userId', 'name email role department company');
+    }
+
+    res.status(200).json({ success: true, data });
+
+  } catch (error) {
+    console.error("Fetch error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
+
+
+// READ BUSINESS IMPACT ANALYSIS DATA FOR A PARTICULAR USER
+// router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
+//     try {
+//         const userId = req.params.id;
+
+//         const data = await BiaData.find({
+//             $or: [
+//                 { userId },
+//                 { company: req.user.company, department: req.user.department, module: req.user.module } 
+//             ]
+//         });
+
+//         res.status(200).json({ success: true, data });
+//     } catch (error) {
+//         console.error("Fetch error:", error);
+//         res.status(500).json({ success: false, message: "Server error" });
+//     }
+// });
+
+// // READ BUSINESS IMPACT ANALYSIS DATA CREATED BY LOGGED-IN USER
+// router.get("/read-business-impact-analysis-data", verifyToken, async (req, res) => {
+//   try {
+//     const loggedInUserId = req.user._id || req.user.id; // based on your JWT token structure
+
+//     const data = await BiaData.find({ userId: loggedInUserId });
+
+//     res.status(200).json({ success: true, data });
+//   } catch (error) {
+//     console.error("Fetch error:", error);
+//     res.status(500).json({ success: false, message: "Server error" });
+//   }
+// });
+
 
 
 module.exports = router;
