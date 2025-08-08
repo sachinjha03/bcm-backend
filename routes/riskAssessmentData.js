@@ -3,6 +3,7 @@ const router = express.Router();
 const RiskAssessmentData = require('../models/RiskAssessmentData');
 const User = require('../models/User');
 const verifyToken = require("../middleware/verifyToken")
+const Notification = require('../models/Notification');
 
 
 
@@ -35,7 +36,7 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
     finalApprovedBy,
     currentStatus,
     company,
-    userId, // ✅ must be ObjectId (sent from frontend)
+    userId,
   } = req.body;
 
   try {
@@ -61,12 +62,42 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
     });
 
     const response = await newData.save();
+
+    try {
+      const senderUser = await User.findById(req.user.userId);
+
+      if (senderUser) {
+        const relatedUsers = await User.find({
+          company: senderUser.company,
+          department: senderUser.department,
+          module: senderUser.module,
+          role: { $in: ['owner', 'admin'] }
+        });
+
+        const notifications = relatedUsers.map(user => ({
+          recipient: user._id,
+          sender: senderUser._id,
+          message: `New risk data submitted by ${senderUser.name}.`,
+          forRole: user.role,  // add this field here
+          department: user.department,
+          company: user.company,
+          module: user.module
+        }));
+
+        await Notification.insertMany(notifications);
+      }
+    } catch (err) {
+      console.error("Error creating notifications:", err);
+    }
+
     res.status(200).json({ success: true, data: response });
+
   } catch (err) {
     console.error('Error saving risk data:', err);
     res.status(400).json({ success: false, reason: err.message || err });
   }
 });
+
 
 // GET: Read all risk assessment data
 router.get('/read-all-risk-assessment-data', verifyToken, async (req, res) => {
@@ -130,7 +161,7 @@ router.delete('/delete-risk-assessment-data/:id', verifyToken, async (req, res) 
 });
 
 
-// Update Risk Assessment Data
+// UPDATE RISK ASSESSMENT DATA
 router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => {
   try {
     const {
@@ -152,15 +183,14 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     } = req.body;
 
     const userRole = req.user.role;
+
     const isEditingData =
       risks !== undefined || definition !== undefined || category !== undefined ||
       likelihood !== undefined || impact !== undefined || riskScore !== undefined ||
       existingControl !== undefined || control !== undefined || residualRisk !== undefined ||
       mitigationPlan !== undefined || riskOwner !== undefined;
 
-    const updateData = {
-      currentStatus,
-    };
+    const updateData = { currentStatus };
 
     if (risks !== undefined) updateData.risks = risks;
     if (definition !== undefined) updateData.definition = definition;
@@ -179,17 +209,12 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       const day = String(now.getDate()).padStart(2, '0');
       const month = String(now.getMonth() + 1).padStart(2, '0');
       const year = now.getFullYear();
-
-      // updateData["lastEditedBy.email"] = lastEditedBy.email;
-      // updateData["lastEditedBy.date"] = `${day}/${month}/${year}`;
-      // updateData["lastEditedBy.time"] = now.toLocaleTimeString();
       updateData.lastEditedBy = {
         email: lastEditedBy.email,
         date: `${day}/${month}/${year}`,
         time: now.toLocaleTimeString()
       };
     }
-
 
     if (approvedBy) updateData.approvedBy = approvedBy;
     if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
@@ -200,6 +225,45 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       { new: true }
     );
 
+    // ✅ SEND NOTIFICATION TO CHAMPION
+    try {
+      const updatedData = await RiskAssessmentData.findById(req.params.id);
+      const senderUser = await User.findById(req.user.userId); // token payload
+      const championUser = await User.findOne({
+        email: updatedData.createdBy,
+        company: senderUser.company,
+        department: senderUser.department,
+        module: senderUser.module,
+        role: "champion"
+      });
+
+      if (championUser && senderUser) {
+        let message = null;
+
+        if (approvedBy) {
+          message = `Your risk "${updatedData.risks}" was approved by ${senderUser.name} (${senderUser.role}).`;
+        } else if (finalApprovedBy) {
+          message = `Your risk "${updatedData.risks}" received final approval by ${senderUser.name} (${senderUser.role}).`;
+        } else if (currentStatus?.toLowerCase().includes("reject")) {
+          message = `Your risk "${updatedData.risks}" was rejected by ${senderUser.name} (${senderUser.role}).`;
+        }
+
+        if (message) {
+          await Notification.create({
+            recipient: championUser._id,
+            sender: senderUser._id,
+            message,
+            forRole: "champion",
+            department: championUser.department,
+            company: championUser.company,
+            module: championUser.module
+          });
+        }
+      }
+    } catch (notifErr) {
+      console.error("Error sending notification to Champion:", notifErr);
+    }
+
     res.json({ success: true, data: updated });
 
   } catch (err) {
@@ -207,6 +271,7 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     res.status(500).json({ success: false, message: "Server Error" });
   }
 });
+
 
 
 

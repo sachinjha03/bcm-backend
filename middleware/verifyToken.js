@@ -1,6 +1,5 @@
-// require('dotenv').config()
+
 const jwt = require('jsonwebtoken');
-// const JWT_SECRET = "DevelopedBySachinJha"
 
 
 const verifyToken = (req, res, next) => {
@@ -19,5 +18,7 @@ const verifyToken = (req, res, next) => {
     return res.status(403).json({ success: false, message: 'Invalid or expired token.' });
   }
 };
+
+
 
 module.exports = verifyToken;

@@ -15,6 +15,7 @@ app.use(cors({
 app.use("/api" , require("./routes/users"))
 app.use("/api" , require("./routes/riskAssessmentData"))
 app.use("/api" , require("./routes/businessImpactAnalysisData"))
+app.use("/api" , require("./routes/notification"))
 
 app.listen(PORT , () => {
     console.log("Backend Started Successfully");
