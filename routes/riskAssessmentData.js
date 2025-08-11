@@ -204,6 +204,7 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     if (mitigationPlan !== undefined) updateData.mitigationPlan = mitigationPlan;
     if (riskOwner !== undefined) updateData.riskOwner = riskOwner;
 
+    // Track last edit info
     if ((userRole === "champion" || userRole === "owner") && isEditingData && lastEditedBy) {
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
@@ -225,44 +226,82 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       { new: true }
     );
 
-    // ✅ SEND NOTIFICATION TO CHAMPION
-    try {
-      const updatedData = await RiskAssessmentData.findById(req.params.id);
-      const senderUser = await User.findById(req.user.userId); // token payload
-      const championUser = await User.findOne({
-        email: updatedData.createdBy,
-        company: senderUser.company,
-        department: senderUser.department,
-        module: senderUser.module,
-        role: "champion"
-      });
+    // ✅ SEND NOTIFICATION
+    // ✅ SEND NOTIFICATION
+try {
+  const updatedData = await RiskAssessmentData.findById(req.params.id);
+  const senderUser = await User.findById(req.user.userId);
 
-      if (championUser && senderUser) {
-        let message = null;
+  // Find champion who created the risk
+  const championUser = await User.findOne({
+    email: updatedData.createdBy,
+    company: senderUser.company,
+    department: senderUser.department,
+    module: senderUser.module,
+    role: "champion"
+  });
 
-        if (approvedBy) {
-          message = `Your risk "${updatedData.risks}" was approved by ${senderUser.name} (${senderUser.role}).`;
-        } else if (finalApprovedBy) {
-          message = `Your risk "${updatedData.risks}" received final approval by ${senderUser.name} (${senderUser.role}).`;
-        } else if (currentStatus?.toLowerCase().includes("reject")) {
-          message = `Your risk "${updatedData.risks}" was rejected by ${senderUser.name} (${senderUser.role}).`;
-        }
+  // Find all owners in same company/department/module
+  const ownerUsers = await User.find({
+    company: senderUser.company,
+    department: senderUser.department,
+    module: senderUser.module,
+    role: "owner"
+  });
 
-        if (message) {
-          await Notification.create({
-            recipient: championUser._id,
-            sender: senderUser._id,
-            message,
-            forRole: "champion",
-            department: championUser.department,
-            company: championUser.company,
-            module: championUser.module
-          });
-        }
-      }
-    } catch (notifErr) {
-      console.error("Error sending notification to Champion:", notifErr);
+  let message = null;
+
+  if (approvedBy) {
+    message = `Your risk "${updatedData.risks}" was approved by ${senderUser.name} (${senderUser.role}).`;
+  } else if (finalApprovedBy) {
+    message = `Your risk "${updatedData.risks}" received final approval by ${senderUser.name} (${senderUser.role}).`;
+  } else if (currentStatus?.toLowerCase().includes("reject")) {
+    message = `Your risk "${updatedData.risks}" was rejected by ${senderUser.name} (${senderUser.role}).`;
+  } 
+  // 🆕 Notify if champion/owner edits the data
+  else if ((userRole === "champion" || userRole === "owner") && isEditingData) {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const year = now.getFullYear();
+    const dateStr = `${day}/${month}/${year}`;
+    const timeStr = now.toLocaleTimeString();
+    message = `${senderUser.name} (${senderUser.role}) edited the risk "${updatedData.risks}" on ${dateStr} at ${timeStr}.`;
+  }
+
+  if (message && senderUser) {
+    let recipients = [];
+
+    // Always include champion
+    if (championUser) recipients.push(championUser);
+
+    // Always include all owners
+    if (ownerUsers.length > 0) {
+      recipients.push(...ownerUsers);
     }
+
+    // Avoid sending notification to the sender themselves
+    recipients = recipients.filter(user => user._id.toString() !== senderUser._id.toString());
+
+    // Create notifications for all recipients
+    const notifications = recipients.map(user => ({
+      recipient: user._id,
+      sender: senderUser._id,
+      message,
+      forRole: user.role,
+      department: user.department,
+      company: user.company,
+      module: user.module
+    }));
+
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
+    }
+  }
+} catch (notifErr) {
+  console.error("Error sending notifications:", notifErr);
+}
+
 
     res.json({ success: true, data: updated });
 
