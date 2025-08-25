@@ -53,7 +53,7 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
                     company: senderUser.company,
                     department: senderUser.department,
                     module: senderUser.module,
-                    role: { $in: ['owner', 'admin'] }
+                    role: { $in: ['owner', 'admin' , 'super admin'] }
                 });
 
                 const notifications = relatedUsers.map(user => ({
@@ -187,7 +187,7 @@ router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, r
 
         let data;
 
-        if (user.role === "owner" || user.role === "admin") {
+        if (user.role === "owner" || user.role === "admin" ||  user.role === "super admin") {
             data = await BiaData.find({
                 company: user.company,
                 department: user.department,

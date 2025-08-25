@@ -71,7 +71,7 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
           company: senderUser.company,
           department: senderUser.department,
           module: senderUser.module,
-          role: { $in: ['owner', 'admin'] }
+          role: { $in: ['owner', 'admin' , 'super admin'] }
         });
 
         const notifications = relatedUsers.map(user => ({
@@ -121,11 +121,11 @@ router.get('/read-risk-assessment-data/:userId', verifyToken, async (req, res) =
 
     let response;
 
-    if (user.role === "owner" || user.role === "admin") {
+    if (user.role === "owner" || user.role === "admin" || user.role === "super admin") {
       // Fetch all records with same company and department
       response = await RiskAssessmentData.find({
         company: user.company,
-        createdBy: { $ne: user.email }, // Optional: exclude their own data
+        // createdBy: { $ne: user.email }, 
       }).populate('userId', 'name email role department company');
     } else {
       // Fetch only their own records
@@ -205,7 +205,7 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     if (riskOwner !== undefined) updateData.riskOwner = riskOwner;
 
     // Track last edit info
-    if ((userRole === "champion" || userRole === "owner") && isEditingData && lastEditedBy) {
+    if ((userRole === "champion" || userRole === "owner" || userRole === "super admin") && isEditingData && lastEditedBy) {
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
       const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -259,7 +259,7 @@ try {
     message = `Your risk "${updatedData.risks}" was rejected by ${senderUser.name} (${senderUser.role}).`;
   } 
   // 🆕 Notify if champion/owner edits the data
-  else if ((userRole === "champion" || userRole === "owner") && isEditingData) {
+  else if ((userRole === "champion" || userRole === "owner" || userRole === "super admin") && isEditingData) {
     const now = new Date();
     const day = String(now.getDate()).padStart(2, '0');
     const month = String(now.getMonth() + 1).padStart(2, '0');
