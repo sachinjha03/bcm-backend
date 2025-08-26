@@ -42,24 +42,25 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
   try {
     const newData = new RiskAssessmentData({
       dataId: generateDataId(),
-      risks,
-      definition,
-      category,
-      likelihood,
-      impact,
-      riskScore,
-      existingControl,
-      control,
-      residualRisk,
-      mitigationPlan,
-      riskOwner,
-      createdBy,
-      approvedBy,
-      finalApprovedBy,
+      risks: { value: risks, comments: [] },
+      definition: { value: definition, comments: [] },
+      category: { value: category, comments: [] },
+      likelihood: { value: likelihood, comments: [] },
+      impact: { value: impact, comments: [] },
+      riskScore: { value: riskScore, comments: [] },
+      existingControl: { value: existingControl, comments: [] },
+      control: { value: control, comments: [] },
+      residualRisk: { value: residualRisk, comments: [] },
+      mitigationPlan: { value: mitigationPlan, comments: [] },
+      riskOwner: { value: riskOwner, comments: [] },
+      createdBy ,
+      approvedBy ,
+      finalApprovedBy ,
       currentStatus,
-      company,
-      userId,
+      company ,
+      userId
     });
+
 
     const response = await newData.save();
 
@@ -71,7 +72,7 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
           company: senderUser.company,
           department: senderUser.department,
           module: senderUser.module,
-          role: { $in: ['owner', 'admin' , 'super admin'] }
+          role: { $in: ['owner', 'admin', 'super admin'] }
         });
 
         const notifications = relatedUsers.map(user => ({
@@ -179,7 +180,9 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       currentStatus,
       lastEditedBy,
       approvedBy,
-      finalApprovedBy
+      finalApprovedBy,
+      fieldName,   // optional: field to add comment
+      newComment   // optional: comment text
     } = req.body;
 
     const userRole = req.user.role;
@@ -190,21 +193,28 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       existingControl !== undefined || control !== undefined || residualRisk !== undefined ||
       mitigationPlan !== undefined || riskOwner !== undefined;
 
-    const updateData = { currentStatus };
+    // Build updateData
+    const updateData = {};
 
-    if (risks !== undefined) updateData.risks = risks;
-    if (definition !== undefined) updateData.definition = definition;
-    if (category !== undefined) updateData.category = category;
-    if (likelihood !== undefined) updateData.likelihood = likelihood;
-    if (impact !== undefined) updateData.impact = impact;
-    if (riskScore !== undefined) updateData.riskScore = riskScore;
-    if (existingControl !== undefined) updateData.existingControl = existingControl;
-    if (control !== undefined) updateData.control = control;
-    if (residualRisk !== undefined) updateData.residualRisk = residualRisk;
-    if (mitigationPlan !== undefined) updateData.mitigationPlan = mitigationPlan;
-    if (riskOwner !== undefined) updateData.riskOwner = riskOwner;
+    // ✅ update `.value` for wrapped fields
+    if (risks !== undefined) updateData["risks.value"] = risks;
+    if (definition !== undefined) updateData["definition.value"] = definition;
+    if (category !== undefined) updateData["category.value"] = category;
+    if (likelihood !== undefined) updateData["likelihood.value"] = likelihood;
+    if (impact !== undefined) updateData["impact.value"] = impact;
+    if (riskScore !== undefined) updateData["riskScore.value"] = riskScore;
+    if (existingControl !== undefined) updateData["existingControl.value"] = existingControl;
+    if (control !== undefined) updateData["control.value"] = control;
+    if (residualRisk !== undefined) updateData["residualRisk.value"] = residualRisk;
+    if (mitigationPlan !== undefined) updateData["mitigationPlan.value"] = mitigationPlan;
+    if (riskOwner !== undefined) updateData["riskOwner.value"] = riskOwner;
 
-    // Track last edit info
+    // ✅ status/approval fields are plain values
+    if (currentStatus) updateData.currentStatus = currentStatus;
+    if (approvedBy) updateData.approvedBy = approvedBy;
+    if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
+
+    // ✅ Track last edit info
     if ((userRole === "champion" || userRole === "owner" || userRole === "super admin") && isEditingData && lastEditedBy) {
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
@@ -217,91 +227,89 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       };
     }
 
-    if (approvedBy) updateData.approvedBy = approvedBy;
-    if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
+    // Build updateOps
+    const updateOps = { $set: updateData };
 
+    // ✅ Handle new comment addition
+    if (fieldName && newComment) {
+      updateOps.$push = {
+        [`${fieldName}.comments`]: {
+          text: newComment,
+          author: req.user.userId,
+          date: new Date()
+        }
+      };
+    }
+
+    // Run update
     const updated = await RiskAssessmentData.findByIdAndUpdate(
       req.params.id,
-      { $set: updateData },
+      updateOps,
       { new: true }
     );
 
-    // ✅ SEND NOTIFICATION
-    // ✅ SEND NOTIFICATION
-try {
-  const updatedData = await RiskAssessmentData.findById(req.params.id);
-  const senderUser = await User.findById(req.user.userId);
+    // 🔔 Notification logic
+    try {
+      const updatedData = await RiskAssessmentData.findById(req.params.id);
+      const senderUser = await User.findById(req.user.userId);
 
-  // Find champion who created the risk
-  const championUser = await User.findOne({
-    email: updatedData.createdBy,
-    company: senderUser.company,
-    department: senderUser.department,
-    module: senderUser.module,
-    role: "champion"
-  });
+      const championUser = await User.findOne({
+        email: updatedData.createdBy,
+        company: senderUser.company,
+        department: senderUser.department,
+        module: senderUser.module,
+        role: "champion"
+      });
 
-  // Find all owners in same company/department/module
-  const ownerUsers = await User.find({
-    company: senderUser.company,
-    department: senderUser.department,
-    module: senderUser.module,
-    role: "owner"
-  });
+      const ownerUsers = await User.find({
+        company: senderUser.company,
+        department: senderUser.department,
+        module: senderUser.module,
+        role: "owner"
+      });
 
-  let message = null;
+      let message = null;
+      if (approvedBy) {
+        message = `Your risk "${updatedData.risks?.value}" was approved by ${senderUser.name} (${senderUser.role}).`;
+      } else if (finalApprovedBy) {
+        message = `Your risk "${updatedData.risks?.value}" received final approval by ${senderUser.name} (${senderUser.role}).`;
+      } else if (currentStatus?.toLowerCase().includes("reject")) {
+        message = `Your risk "${updatedData.risks?.value}" was rejected by ${senderUser.name} (${senderUser.role}).`;
+      } else if ((userRole === "champion" || userRole === "owner" || userRole === "super admin") && isEditingData) {
+        const now = new Date();
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = now.getFullYear();
+        const dateStr = `${day}/${month}/${year}`;
+        const timeStr = now.toLocaleTimeString();
+        message = `${senderUser.name} (${senderUser.role}) edited the risk "${updatedData.risks?.value}" on ${dateStr} at ${timeStr}.`;
+      }
 
-  if (approvedBy) {
-    message = `Your risk "${updatedData.risks}" was approved by ${senderUser.name} (${senderUser.role}).`;
-  } else if (finalApprovedBy) {
-    message = `Your risk "${updatedData.risks}" received final approval by ${senderUser.name} (${senderUser.role}).`;
-  } else if (currentStatus?.toLowerCase().includes("reject")) {
-    message = `Your risk "${updatedData.risks}" was rejected by ${senderUser.name} (${senderUser.role}).`;
-  } 
-  // 🆕 Notify if champion/owner edits the data
-  else if ((userRole === "champion" || userRole === "owner" || userRole === "super admin") && isEditingData) {
-    const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year = now.getFullYear();
-    const dateStr = `${day}/${month}/${year}`;
-    const timeStr = now.toLocaleTimeString();
-    message = `${senderUser.name} (${senderUser.role}) edited the risk "${updatedData.risks}" on ${dateStr} at ${timeStr}.`;
-  }
+      if (message && senderUser) {
+        let recipients = [];
+        if (championUser) recipients.push(championUser);
+        if (ownerUsers.length > 0) recipients.push(...ownerUsers);
 
-  if (message && senderUser) {
-    let recipients = [];
+        // Avoid sending notification to the sender themselves
+        recipients = recipients.filter(user => user._id.toString() !== senderUser._id.toString());
 
-    // Always include champion
-    if (championUser) recipients.push(championUser);
+        const notifications = recipients.map(user => ({
+          recipient: user._id,
+          sender: senderUser._id,
+          message,
+          forRole: user.role,
+          department: user.department,
+          company: user.company,
+          module: user.module
+        }));
 
-    // Always include all owners
-    if (ownerUsers.length > 0) {
-      recipients.push(...ownerUsers);
+        if (notifications.length > 0) {
+          await Notification.insertMany(notifications);
+        }
+      }
+    } catch (notifErr) {
+      console.error("Error sending notifications:", notifErr);
     }
-
-    // Avoid sending notification to the sender themselves
-    recipients = recipients.filter(user => user._id.toString() !== senderUser._id.toString());
-
-    // Create notifications for all recipients
-    const notifications = recipients.map(user => ({
-      recipient: user._id,
-      sender: senderUser._id,
-      message,
-      forRole: user.role,
-      department: user.department,
-      company: user.company,
-      module: user.module
-    }));
-
-    if (notifications.length > 0) {
-      await Notification.insertMany(notifications);
-    }
-  }
-} catch (notifErr) {
-  console.error("Error sending notifications:", notifErr);
-}
-
 
     res.json({ success: true, data: updated });
 
@@ -311,6 +319,21 @@ try {
   }
 });
 
+
+router.post("/add-comment/:id", verifyToken, async (req, res) => {
+  const { fieldName, text } = req.body;  // fieldName like "risks" or "definition"
+  try {
+    const comment = { text, author: req.user.userId };
+    const updated = await RiskAssessmentData.findByIdAndUpdate(
+      req.params.id,
+      { $push: { [`${fieldName}.comments`]: comment } },
+      { new: true }
+    );
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, reason: err.message });
+  }
+});
 
 
 
