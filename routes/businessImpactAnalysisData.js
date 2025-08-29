@@ -53,7 +53,7 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
                     company: senderUser.company,
                     department: senderUser.department,
                     module: senderUser.module,
-                    role: { $in: ['owner', 'admin' , 'super admin'] }
+                    role: { $in: ['owner', 'admin', 'super admin'] }
                 });
 
                 const notifications = relatedUsers.map(user => ({
@@ -97,39 +97,73 @@ router.delete("/delete-business-impact-analysis-data/:id", verifyToken, async (r
 })
 
 // PUT /api/update-business-impact-analysis-data/:id
+// PUT /api/update-business-impact-analysis-data/:id
 router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
     try {
-        const { currentStatus, lastEditedBy, approvedBy, finalApprovedBy, formData } = req.body;
-
-        const updateData = {
+        const {
             currentStatus,
             lastEditedBy,
-        };
+            approvedBy,
+            finalApprovedBy,
+            formData,
+            fieldName,   // if comment is being added
+            newComment   // comment text
+        } = req.body;
 
+        const updateOps = { $set: {} };
+
+        // ✅ update statuses
+        if (currentStatus) updateOps.currentStatus = currentStatus;
+        if (approvedBy) updateOps.approvedBy = approvedBy;
+        if (finalApprovedBy) updateOps.finalApprovedBy = finalApprovedBy;
+
+        // ✅ track last edit info
         if (lastEditedBy && lastEditedBy.email) {
             const now = new Date();
-            const day = String(now.getDate()).padStart(2, '0');
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const year = now.getFullYear();
-
-            updateData.lastEditedBy = {
+            updateOps.lastEditedBy = {
                 email: lastEditedBy.email,
-                date: `${day}/${month}/${year}`,
+                date: now.toLocaleDateString("en-GB"),
                 time: now.toLocaleTimeString()
             };
         }
 
-        if (approvedBy) updateData.approvedBy = approvedBy;
-        if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
-        if (formData) updateData.formData = formData;
+        // ✅ update full formData values
+        if (formData) {
+            for (const [key, val] of Object.entries(formData)) {
+                // Ensure value is always a string
+                const actualValue = typeof val === "object" && val.value !== undefined ? val.value : val;
+                // Initialize comments if not exists
+                const comments = typeof val === "object" && Array.isArray(val.comments) ? val.comments : [];
+                
+                updateOps.$set[`formData.${key}`] = {
+                    value: actualValue,
+                    comments
+                };
+            }
+        }
+
+        // ✅ add a new comment to a specific field
+        if (fieldName && newComment) {
+            updateOps.$push = {
+                [`formData.${fieldName}.comments`]: {
+                    text: newComment,
+                    author: req.user.userId,
+                    date: new Date()
+                }
+            };
+        }
 
         const updated = await BiaData.findByIdAndUpdate(
             req.params.id,
-            { $set: updateData },
+            updateOps,
             { new: true }
         );
 
-        // ✅ Send notification to creator (champion or whoever submitted)
+        if (!updated) {
+            return res.status(404).json({ success: false, message: "Data not found" });
+        }
+
+        // 🔔 notifications (same as your old code)
         try {
             const updatedData = await BiaData.findById(req.params.id);
             const senderUser = await User.findById(req.user.userId);
@@ -142,7 +176,6 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
 
             if (creatorUser && senderUser) {
                 let message = null;
-
                 if (approvedBy) {
                     message = `Your BIA entry was approved by ${senderUser.name} (${senderUser.role}).`;
                 } else if (finalApprovedBy) {
@@ -175,6 +208,8 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
 });
 
 
+
+
 // GET data for a user
 router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
     try {
@@ -187,12 +222,12 @@ router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, r
 
         let data;
 
-        if (user.role === "owner" || user.role === "admin" ||  user.role === "super admin") {
+        if (user.role === "owner" || user.role === "admin" || user.role === "super admin") {
             data = await BiaData.find({
                 company: user.company,
                 department: user.department,
                 module: user.module,
-                createdBy: { $ne: user.email }
+                // createdBy: { $ne: user.email }
             }).populate('userId', 'name email role department company');
         } else {
             data = await BiaData.find({ userId })
@@ -206,6 +241,23 @@ router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, r
         res.status(500).json({ success: false, message: "Server error" });
     }
 });
+
+
+router.post("/add-comment/:id", verifyToken, async (req, res) => {
+    const { fieldName, text } = req.body;  // fieldName like "risks" or "definition"
+    try {
+        const comment = { text, author: req.user.userId };
+        const updated = await RiskAssessmentData.findByIdAndUpdate(
+            req.params.id,
+            { $push: { [`${fieldName}.comments`]: comment } },
+            { new: true }
+        );
+        res.json({ success: true, data: updated });
+    } catch (err) {
+        res.status(500).json({ success: false, reason: err.message });
+    }
+});
+
 
 module.exports = router;
 
