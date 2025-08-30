@@ -53,11 +53,11 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
       residualRisk: { value: residualRisk, comments: [] },
       mitigationPlan: { value: mitigationPlan, comments: [] },
       riskOwner: { value: riskOwner, comments: [] },
-      createdBy ,
-      approvedBy ,
-      finalApprovedBy ,
+      createdBy,
+      approvedBy,
+      finalApprovedBy,
       currentStatus,
-      company ,
+      company,
       userId
     });
 
@@ -226,6 +226,20 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
         time: now.toLocaleTimeString()
       };
     }
+    // // ✅ Track last edit info (save for any role if provided)
+    // if (lastEditedBy?.email) {
+    //   const now = new Date();
+    //   const day = String(now.getDate()).padStart(2, '0');
+    //   const month = String(now.getMonth() + 1).padStart(2, '0');
+    //   const year = now.getFullYear();
+
+    //   updateData.lastEditedBy = {
+    //     email: lastEditedBy.email,
+    //     date: `${day}/${month}/${year}`,
+    //     time: now.toLocaleTimeString()
+    //   };
+    // }
+
 
     // Build updateOps
     const updateOps = { $set: updateData };
