@@ -5,6 +5,9 @@ const User = require('../models/User');
 const verifyToken = require("../middleware/verifyToken")
 const Notification = require('../models/Notification');
 
+const ExcelJS = require("exceljs");
+const archiver = require("archiver");
+
 
 
 // Utility to generate a unique dataId
@@ -348,6 +351,164 @@ router.post("/add-comment/:id", verifyToken, async (req, res) => {
     res.status(500).json({ success: false, reason: err.message });
   }
 });
+
+
+// DOWNLOAD DATA (RA)
+// -------------------
+
+// GET /api/download-risk-assessment/:year
+router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
+  try {
+    const year = Number(req.params.year);
+    if (!Number.isInteger(year)) {
+      return res.status(400).json({ message: "Invalid year" });
+    }
+
+    // Use UTC bounds to avoid timezone off-by-one
+    const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0));
+    const end   = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0));
+
+    const user = await User.findById(req.user.userId).lean();
+
+    // Base query: by creation date
+    const query = { dateOfCreation: { $gte: start, $lt: end } };
+
+
+    // Role-based scoping
+    if (user.role === "champion") {
+      query.userId = user._id; 
+    } else if (["owner", "admin", "super admin"].includes(user.role)) {
+      query.company = user.company;
+    }
+    
+
+    const data = await RiskAssessmentData.find(query).lean();
+    
+
+    if (!data.length) {
+      return res.status(404).json({ message: "No data found for this year" });
+    }
+
+    // Build Excel
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Risk Assessment Data");
+
+    sheet.columns = [
+      { header: "S.No", key: "sno", width: 6 },
+      { header: "Risks", key: "risks", width: 30 },
+      { header: "Risks Comments", key: "risksComments", width: 50 },
+      { header: "Definition", key: "definition", width: 30 },
+      { header: "Definition Comments", key: "definitionComments", width: 50 },
+      { header: "Category", key: "category", width: 15 },
+      { header: "Likelihood", key: "likelihood", width: 12 },
+      { header: "Impact", key: "impact", width: 12 },
+      { header: "Risk Score", key: "riskScore", width: 12 },
+      { header: "Existing Control", key: "existingControl", width: 25 },
+      { header: "Existing Control Comments", key: "existingControlComments", width: 50 },
+      { header: "Mitigation Plan", key: "mitigationPlan", width: 25 },
+      { header: "Mitigation Plan Comments", key: "mitigationPlanComments", width: 50 },
+      { header: "Risk Owner", key: "riskOwner", width: 20 },
+      { header: "Risk Owner Comments", key: "riskOwnerComments", width: 50 },
+      { header: "Status", key: "status", width: 20 },
+      { header: "Last Edit", key: "lastEdit", width: 35 },
+      { header: "Created By", key: "createdBy", width: 30 },
+      { header: "Created At", key: "createdAt", width: 24 },
+    ];
+
+    const formatCommentDate = (c) => {
+      // c.date may be Date, ISO string, or already "dd/mm/yy hh:mm:ss"
+      let dateStr = "";
+      if (c?.date instanceof Date) {
+        dateStr =
+          c.date.toLocaleDateString("en-GB") + " " + c.date.toLocaleTimeString();
+      } else if (typeof c?.date === "string") {
+        const d = new Date(c.date);
+        dateStr = isNaN(d)
+          ? c.date // fallback to stored string
+          : d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString();
+      }
+      // If explicit time exists, include it (avoid duplicating)
+      if (c?.time && typeof c.time === "string" && !dateStr.includes(c.time)) {
+        dateStr = `${dateStr ? dateStr + " " : ""}${c.time}`;
+      }
+      return dateStr || "";
+    };
+
+    const formatComments = (arr) =>
+      Array.isArray(arr) && arr.length
+        ? arr
+            .map((c) => {
+              const ts = formatCommentDate(c);
+              return ts ? `[${ts}] ${c.text || ""}` : `${c.text || ""}`;
+            })
+            .join("\n")
+        : "";
+
+    data.forEach((rec, i) => {
+      const row = sheet.addRow({
+        sno: i + 1,
+        risks: rec.risks?.value || "",
+        risksComments: formatComments(rec.risks?.comments),
+        definition: rec.definition?.value || "",
+        definitionComments: formatComments(rec.definition?.comments),
+        category: rec.category?.value || "",
+        likelihood: rec.likelihood?.value ?? "",
+        impact: rec.impact?.value ?? "",
+        riskScore: rec.riskScore?.value ?? "",
+        existingControl: rec.existingControl?.value || "",
+        existingControlComments: formatComments(rec.existingControl?.comments),
+        mitigationPlan: rec.mitigationPlan?.value || "",
+        mitigationPlanComments: formatComments(rec.mitigationPlan?.comments),
+        riskOwner: rec.riskOwner?.value || "",
+        riskOwnerComments: formatComments(rec.riskOwner?.comments),
+        status: rec.currentStatus || "",
+        lastEdit: rec.lastEditedBy
+          ? `${rec.lastEditedBy.email || ""}${
+              rec.lastEditedBy.date ? ", " + rec.lastEditedBy.date : ""
+            }${rec.lastEditedBy.time ? ", " + rec.lastEditedBy.time : ""}`
+          : "Not Edited Yet",
+        createdBy: rec.createdBy || "",
+        createdAt:
+          rec.dateOfCreation instanceof Date
+            ? rec.dateOfCreation.toLocaleString()
+            : rec.dateOfCreation || "",
+      });
+
+      // Wrap text so long comments auto-expand row height
+      row.eachCell((cell) => {
+        cell.alignment = { wrapText: true, vertical: "top" };
+      });
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    // Zip and stream to client
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=RA_Data_${year}.zip`
+    );
+
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", (err) => {
+      console.error("Zip error:", err);
+      // Important: only send if headers not sent
+      if (!res.headersSent) {
+        res.status(500).json({ message: "Failed to generate zip" });
+      }
+    });
+
+    archive.pipe(res);
+    archive.append(buffer, { name: `RA_Data_${year}.xlsx` });
+    await archive.finalize();
+  } catch (err) {
+    console.error("Download error:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: "Server Error" });
+    }
+  }
+});
+
 
 
 

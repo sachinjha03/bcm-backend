@@ -4,6 +4,8 @@ const BiaData = require('../models/BusinessImpactAnalysisData');
 const verifyToken = require('../middleware/verifyToken');
 const User = require('../models/User');
 const Notification = require('../models/Notification'); // ✅ Add this
+const ExcelJS = require("exceljs");
+const archiver = require("archiver");
 
 // Utility to generate a unique dataId
 const generateDataId = (length = 8) => {
@@ -134,7 +136,7 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
                 const actualValue = typeof val === "object" && val.value !== undefined ? val.value : val;
                 // Initialize comments if not exists
                 const comments = typeof val === "object" && Array.isArray(val.comments) ? val.comments : [];
-                
+
                 updateOps.$set[`formData.${key}`] = {
                     value: actualValue,
                     comments
@@ -257,6 +259,163 @@ router.post("/add-comment/:id", verifyToken, async (req, res) => {
         res.status(500).json({ success: false, reason: err.message });
     }
 });
+
+
+
+
+
+// 📌 Helper: format comments into readable text
+const formatComments = (arr) =>
+    (arr || [])
+        .map(
+            (c) =>
+                `[${new Date(c.date).toLocaleDateString("en-GB")} ${new Date(
+                    c.date
+                ).toLocaleTimeString()}] ${c.text}`
+        )
+        .join("\n");
+
+// 📌 DOWNLOAD BIA DATA AS ZIP
+router.get("/download-bia/:year", verifyToken, async (req, res) => {
+    try {
+        const year = parseInt(req.params.year, 10);
+        const start = new Date(year, 0, 1);
+        const end = new Date(year + 1, 0, 1);
+
+        // Get logged-in user
+        const user = await User.findById(req.user.userId);
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        // Build query
+        let query = { dateOfCreation: { $gte: start, $lt: end } };
+        if (user.role === "champion") {
+            query.userId = user._id;
+        } else if (["owner", "admin", "super admin"].includes(user.role)) {
+            query.company = user.company;
+            query.department = user.department;
+            query.module = user.module;
+        }
+
+        const data = await BiaData.find(query);
+        if (!data.length) {
+            return res.status(404).json({ message: "No data found for this year" });
+        }
+
+        // Collect all unique dynamic field names
+        const allFields = new Set();
+        data.forEach((rec) => {
+            if (rec.formData) {
+                if (rec.formData instanceof Map) {
+                    rec.formData.forEach((_, key) => allFields.add(key));
+                } else if (typeof rec.formData === "object") {
+                    Object.keys(rec.formData).forEach((key) => allFields.add(key));
+                }
+            }
+        });
+
+        // Create workbook & sheet
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet("BIA Data");
+
+        // Fixed columns
+        const columns = [
+            { header: "S.No", key: "sno", width: 6 },
+            { header: "Status", key: "status", width: 20 },
+            { header: "Last Edit", key: "lastEdit", width: 35 },
+            { header: "Created By", key: "createdBy", width: 25 },
+        ];
+
+        // Dynamic columns
+        // Dynamic columns
+        allFields.forEach((field) => {
+            // For value
+            columns.push({
+                header: field.replace(/_/g, " "), // remove underscores in display
+                key: `${field}_value`,
+                width: 30,
+            });
+            // For comments
+            columns.push({
+                header: `${field.replace(/_/g, " ")} Comments`, // remove underscores
+                key: `${field}_comments`,
+                width: 40,
+            });
+        });
+
+
+        sheet.columns = columns;
+
+        // Add rows
+        data.forEach((rec, i) => {
+            const rowObj = {
+                sno: i + 1,
+                status: rec.currentStatus,
+                lastEdit: rec.lastEditedBy
+                    ? `${rec.lastEditedBy.email}, ${rec.lastEditedBy.date}, ${rec.lastEditedBy.time}`
+                    : "Not Edited Yet",
+                createdBy: rec.createdBy,
+            };
+
+            if (rec.formData) {
+                // Handle Map
+                if (rec.formData instanceof Map) {
+                    rec.formData.forEach((val, key) => {
+                        if (val && typeof val === "object" && "value" in val) {
+                            rowObj[`${key}_value`] = val.value || "";
+                            rowObj[`${key}_comments`] = formatComments(val.comments);
+                        } else {
+                            rowObj[`${key}_value`] = val || "";
+                            rowObj[`${key}_comments`] = "";
+                        }
+                    });
+                }
+                // Handle Object
+                else if (typeof rec.formData === "object") {
+                    Object.entries(rec.formData).forEach(([key, val]) => {
+                        if (val && typeof val === "object" && "value" in val) {
+                            rowObj[`${key}_value`] = val.value || "";
+                            rowObj[`${key}_comments`] = formatComments(val.comments);
+                        } else {
+                            rowObj[`${key}_value`] = val || "";
+                            rowObj[`${key}_comments`] = "";
+                        }
+                    });
+                }
+            }
+
+            sheet.addRow(rowObj);
+        });
+
+        // Wrap text & align top
+        sheet.eachRow((row) => {
+            row.eachCell((cell) => {
+                cell.alignment = { wrapText: true, vertical: "top" };
+            });
+        });
+
+        // Generate Excel buffer
+        const buffer = await workbook.xlsx.writeBuffer();
+
+        // Create zip
+        res.setHeader("Content-Type", "application/zip");
+        res.setHeader("Content-Disposition", `attachment; filename=BIA_Data_${year}.zip`);
+
+        const archive = archiver("zip");
+        archive.pipe(res);
+        archive.append(buffer, { name: `BIA_Data_${year}.xlsx` });
+        await archive.finalize();
+    } catch (err) {
+        console.error("Download BIA error:", err);
+        res.status(500).json({ success: false, message: "Server Error" });
+    }
+});
+
+
+
+
+
 
 
 module.exports = router;
