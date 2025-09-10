@@ -30,8 +30,10 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
     impact,
     riskScore,
     existingControl,
+    controlEffectiveness,
     control,
     residualRisk,
+    treatmentOption,
     mitigationPlan,
     riskOwner,
     createdBy,
@@ -52,8 +54,10 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
       impact: { value: impact, comments: [] },
       riskScore: { value: riskScore, comments: [] },
       existingControl: { value: existingControl, comments: [] },
+      controlEffectiveness: { value: controlEffectiveness, comments: [] },
       control: { value: control, comments: [] },
       residualRisk: { value: residualRisk, comments: [] },
+      treatmentOption: { value: treatmentOption, comments: [] },
       mitigationPlan: { value: mitigationPlan, comments: [] },
       riskOwner: { value: riskOwner, comments: [] },
       createdBy,
@@ -176,8 +180,10 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       impact,
       riskScore,
       existingControl,
+      controlEffectiveness,
       control,
       residualRisk,
+      treatmentOption,
       mitigationPlan,
       riskOwner,
       currentStatus,
@@ -207,8 +213,10 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     if (impact !== undefined) updateData["impact.value"] = impact;
     if (riskScore !== undefined) updateData["riskScore.value"] = riskScore;
     if (existingControl !== undefined) updateData["existingControl.value"] = existingControl;
+    if (controlEffectiveness !== undefined) updateData["controlEffectiveness.value"] = controlEffectiveness;
     if (control !== undefined) updateData["control.value"] = control;
     if (residualRisk !== undefined) updateData["residualRisk.value"] = residualRisk;
+    if (treatmentOption !== undefined) updateData["treatmentOption.value"] = treatmentOption;
     if (mitigationPlan !== undefined) updateData["mitigationPlan.value"] = mitigationPlan;
     if (riskOwner !== undefined) updateData["riskOwner.value"] = riskOwner;
 
@@ -405,6 +413,8 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
       { header: "Risk Score", key: "riskScore", width: 12 },
       { header: "Existing Control", key: "existingControl", width: 25 },
       { header: "Existing Control Comments", key: "existingControlComments", width: 50 },
+      { header: "Control Effectiveness", key: "controlEffectiveness", width: 25 },
+      { header: "Control Effectiveness Comments", key: "controlEffectivenessComments", width: 50 },
       { header: "Mitigation Plan", key: "mitigationPlan", width: 25 },
       { header: "Mitigation Plan Comments", key: "mitigationPlanComments", width: 50 },
       { header: "Risk Owner", key: "riskOwner", width: 20 },
@@ -457,6 +467,8 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
         riskScore: rec.riskScore?.value ?? "",
         existingControl: rec.existingControl?.value || "",
         existingControlComments: formatComments(rec.existingControl?.comments),
+        controlEffectiveness: rec.controlEffectiveness?.value || "",
+        controlEffectivenessComments: formatComments(rec.controlEffectiveness?.comments),
         mitigationPlan: rec.mitigationPlan?.value || "",
         mitigationPlanComments: formatComments(rec.mitigationPlan?.comments),
         riskOwner: rec.riskOwner?.value || "",
