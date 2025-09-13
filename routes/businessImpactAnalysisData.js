@@ -27,6 +27,7 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
             formData,
             createdBy,
             userId,
+            currentStatus 
         } = req.body;
 
         if (!company || !department || !module || !formData || !createdBy || !userId) {
@@ -41,7 +42,7 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
             formData,
             createdBy,
             userId,
-            currentStatus: 'Pending for Owner Approval',
+            currentStatus: currentStatus || 'Pending for Owner Approval'
         });
 
         const saved = await newEntry.save();
