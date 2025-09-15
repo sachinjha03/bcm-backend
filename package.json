@@ -16,7 +16,10 @@
     "dotenv": "^17.2.0",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
+    "googleapis": "^159.0.0",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.16.2"
+    "mongoose": "^8.16.2",
+    "multer": "^2.0.2",
+    "stream": "^0.0.3"
   }
 }

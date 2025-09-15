@@ -16,6 +16,7 @@ app.use("/api" , require("./routes/users"))
 app.use("/api" , require("./routes/riskAssessmentData"))
 app.use("/api" , require("./routes/businessImpactAnalysisData"))
 app.use("/api" , require("./routes/notification"))
+app.use('/api', require("./routes/uploadBackup"));
 
 app.listen(PORT , () => {
     console.log("Backend Started Successfully");
