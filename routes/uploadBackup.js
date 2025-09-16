@@ -2,6 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const { google } = require('googleapis');
 const { Readable } = require('stream');
+const path = require('path');
+
 
 const router = express.Router();
 const upload = multer();  // Store file in memory
@@ -16,14 +18,14 @@ function bufferToStream(buffer) {
 router.post('/upload-backup', upload.single('file'), async (req, res) => {
   try {
     const auth = new google.auth.GoogleAuth({
-      keyFile: 'credentials.json',   // Your service account file
+      keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,  // Use env var here
       scopes: ['https://www.googleapis.com/auth/drive.file'],
     });
 
     const drive = google.drive({ version: 'v3', auth });
 
     const fileMetadata = {
-      name: req.file.originalname,  
+      name: req.file.originalname,
     };
 
     const media = {
