@@ -6,6 +6,8 @@ const User = require('../models/User');
 const Notification = require('../models/Notification'); // ✅ Add this
 const ExcelJS = require("exceljs");
 const archiver = require("archiver");
+const transporter = require("../config/emailConfig")
+
 
 // Utility to generate a unique dataId
 const generateDataId = (length = 8) => {
@@ -17,7 +19,6 @@ const generateDataId = (length = 8) => {
     return dataId;
 };
 
-// POST /api/add-business-impact-analysis-data
 router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) => {
     try {
         const {
@@ -47,7 +48,7 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
 
         const saved = await newEntry.save();
 
-        // ✅ Send notifications to owner/admin of the same company/department/module
+        // ✅ Notifications + Emails
         try {
             const senderUser = await User.findById(req.user.userId);
 
@@ -70,9 +71,61 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
                 }));
 
                 await Notification.insertMany(notifications);
+
+                // ✅ Send Email to Each Related User
+                for (const user of relatedUsers) {
+                    if (user.email) {
+                        const mailOptions = {
+                            from: process.env.EMAIL_USER,
+                            to: user.email,
+                            subject: '📊 New BIA Data Submitted',
+                            html: `
+                                <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                                  <h2 style="color: #1976d2;">New Business Impact Analysis Data Submitted</h2>
+                                  <p>Hello <strong>${user.name}</strong>,</p>
+                                  <p>A new BIA data entry has been submitted by <strong>${senderUser.name}</strong>.</p>
+
+                                  <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                                    <tr>
+                                      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Message</strong></td>
+                                      <td style="padding: 8px; border: 1px solid #ddd;">New BIA data submitted by ${senderUser.name}</td>
+                                    </tr>
+                                    <tr>
+                                      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                                      <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                                    </tr>
+                                    <tr>
+                                      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                                      <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                                    </tr>
+                                    <tr>
+                                      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                                      <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                                    </tr>
+                                  </table>
+
+                                  <hr style="margin: 20px 0;" />
+
+                                  <p style="font-size: 0.9em; color: #555;">
+                                    Regards,<br/>
+                                    Your Risk Management System
+                                  </p>
+                                </div>
+                            `
+                        };
+
+                        transporter.sendMail(mailOptions, (error, info) => {
+                            if (error) {
+                                console.error(`Failed to send email to ${user.email}:`, error);
+                            } else {
+                                console.log(`Email sent to ${user.email}: ${info.response}`);
+                            }
+                        });
+                    }
+                }
             }
         } catch (err) {
-            console.error("Error creating notifications for BIA submission:", err);
+            console.error("Error creating notifications and sending emails for BIA:", err);
         }
 
         res.status(201).json({ success: true, message: 'BIA data saved successfully', data: saved });
@@ -82,6 +135,7 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
         res.status(500).json({ success: false, message: 'Server error', error });
     }
 });
+
 
 
 // DELETE THE BUSINESS IMPACT ANALYSIS DATA
@@ -99,7 +153,7 @@ router.delete("/delete-business-impact-analysis-data/:id", verifyToken, async (r
     }
 })
 
-// PUT /api/update-business-impact-analysis-data/:id
+
 // PUT /api/update-business-impact-analysis-data/:id
 router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
     try {
@@ -109,18 +163,16 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
             approvedBy,
             finalApprovedBy,
             formData,
-            fieldName,   // if comment is being added
-            newComment   // comment text
+            fieldName,
+            newComment
         } = req.body;
 
         const updateOps = { $set: {} };
 
-        // ✅ update statuses
         if (currentStatus) updateOps.currentStatus = currentStatus;
         if (approvedBy) updateOps.approvedBy = approvedBy;
         if (finalApprovedBy) updateOps.finalApprovedBy = finalApprovedBy;
 
-        // ✅ track last edit info
         if (lastEditedBy && lastEditedBy.email) {
             const now = new Date();
             updateOps.lastEditedBy = {
@@ -130,12 +182,9 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
             };
         }
 
-        // ✅ update full formData values
         if (formData) {
             for (const [key, val] of Object.entries(formData)) {
-                // Ensure value is always a string
                 const actualValue = typeof val === "object" && val.value !== undefined ? val.value : val;
-                // Initialize comments if not exists
                 const comments = typeof val === "object" && Array.isArray(val.comments) ? val.comments : [];
 
                 updateOps.$set[`formData.${key}`] = {
@@ -145,7 +194,6 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
             }
         }
 
-        // ✅ add a new comment to a specific field
         if (fieldName && newComment) {
             updateOps.$push = {
                 [`formData.${fieldName}.comments`]: {
@@ -166,7 +214,7 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
             return res.status(404).json({ success: false, message: "Data not found" });
         }
 
-        // 🔔 notifications (same as your old code)
+        // 🔔 Notification & Email Logic
         try {
             const updatedData = await BiaData.findById(req.params.id);
             const senderUser = await User.findById(req.user.userId);
@@ -177,30 +225,71 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
                 module: senderUser.module
             });
 
-            if (creatorUser && senderUser) {
-                let message = null;
-                if (approvedBy) {
-                    message = `Your BIA entry was approved by ${senderUser.name} (${senderUser.role}).`;
-                } else if (finalApprovedBy) {
-                    message = `Your BIA entry received final approval by ${senderUser.name} (${senderUser.role}).`;
-                } else if (currentStatus?.toLowerCase().includes("reject")) {
-                    message = `Your BIA entry was rejected by ${senderUser.name} (${senderUser.role}).`;
-                }
+            let message = null;
+            if (approvedBy) {
+                message = `Your BIA entry was approved by ${senderUser.name} (${senderUser.role}).`;
+            } else if (currentStatus?.toLowerCase().includes("reject")) {
+                message = `Your BIA entry was rejected by ${senderUser.name} (${senderUser.role}).`;
+            }
 
-                if (message) {
-                    await Notification.create({
-                        recipient: creatorUser._id,
-                        sender: senderUser._id,
-                        message,
-                        forRole: creatorUser.role,
-                        department: creatorUser.department,
-                        company: creatorUser.company,
-                        module: creatorUser.module
-                    });
-                }
+            if (message && senderUser && creatorUser && creatorUser.email) {
+                // Save Notification in DB
+                await Notification.create({
+                    recipient: creatorUser._id,
+                    sender: senderUser._id,
+                    message,
+                    forRole: creatorUser.role,
+                    department: creatorUser.department,
+                    company: creatorUser.company,
+                    module: creatorUser.module
+                });
+
+                // ✅ Send Email Notification
+                const mailOptions = {
+                    from: process.env.EMAIL_USER,
+                    to: creatorUser.email,
+                    subject: '✅ BIA Data Status Update',
+                    html: `
+                        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                          <h2 style="color: #1976d2;">Business Impact Analysis Update</h2>
+                          <p>Hello <strong>${creatorUser.name}</strong>,</p>
+                          <p>${message}</p>
+
+                          <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                            <tr>
+                              <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                              <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                              <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                              <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                            </tr>
+                          </table>
+
+                          <hr style="margin: 20px 0;" />
+
+                          <p style="font-size: 0.9em; color: #555;">
+                            Regards,<br/>
+                            Your Risk Management System
+                          </p>
+                        </div>
+                    `
+                };
+
+                transporter.sendMail(mailOptions, (error, info) => {
+                    if (error) {
+                        console.error(`Failed to send email to ${creatorUser.email}:`, error);
+                    } else {
+                        console.log(`Email sent to ${creatorUser.email}: ${info.response}`);
+                    }
+                });
             }
         } catch (notifErr) {
-            console.error("Error sending notification for BIA update:", notifErr);
+            console.error("Error sending notification or email:", notifErr);
         }
 
         res.json({ success: true, data: updated });
@@ -209,7 +298,6 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
 
 
 

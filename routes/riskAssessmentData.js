@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const transporter = require("../config/emailConfig")
 const RiskAssessmentData = require('../models/RiskAssessmentData');
 const User = require('../models/User');
 const verifyToken = require("../middleware/verifyToken")
@@ -21,6 +22,8 @@ const generateDataId = (length = 8) => {
 };
 
 // POST: Add new risk assessment data
+
+
 router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
   const {
     risks,
@@ -68,7 +71,6 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
       userId
     });
 
-
     const response = await newData.save();
 
     try {
@@ -86,16 +88,70 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
           recipient: user._id,
           sender: senderUser._id,
           message: `New risk data submitted by ${senderUser.name}.`,
-          forRole: user.role,  // add this field here
+          forRole: user.role,
           department: user.department,
           company: user.company,
           module: user.module
         }));
 
         await Notification.insertMany(notifications);
+
+        // ✅ Send Email Notifications
+        for (const user of relatedUsers) {
+          if (user.email) {
+            const mailOptions = {
+              from: process.env.EMAIL_USER,
+              to: user.email,
+              subject: '🛡️ New Risk Assessment Data Submitted',
+              html: `
+              <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                <h2 style="color: #1976d2;">New Risk Assessment Data Submitted</h2>
+                <p>Hello <strong>${user.name}</strong>,</p>
+
+                <p>A new risk assessment has been submitted by <strong>${senderUser.name}</strong>.</p>
+
+                <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                  <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Message</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">New risk data submitted by ${senderUser.name}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                  </tr>
+                </table>
+
+                <hr style="margin: 20px 0;" />
+
+                <p style="font-size: 0.9em; color: #555;">
+                  Regards,<br/>
+                  Your Risk Management System
+                </p>
+              </div>
+               `
+            };
+
+
+            transporter.sendMail(mailOptions, (error, info) => {
+              if (error) {
+                console.error(`Failed to send email to ${user.email}:`, error);
+              } else {
+                console.log(`Email sent to ${user.email}: ${info.response}`);
+              }
+            });
+          }
+        }
       }
     } catch (err) {
-      console.error("Error creating notifications:", err);
+      console.error("Error creating notifications and sending emails:", err);
     }
 
     res.status(200).json({ success: true, data: response });
@@ -105,6 +161,7 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
     res.status(400).json({ success: false, reason: err.message || err });
   }
 });
+
 
 
 // GET: Read all risk assessment data
@@ -169,7 +226,6 @@ router.delete('/delete-risk-assessment-data/:id', verifyToken, async (req, res) 
 });
 
 
-// UPDATE RISK ASSESSMENT DATA
 router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => {
   try {
     const {
@@ -190,8 +246,8 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       lastEditedBy,
       approvedBy,
       finalApprovedBy,
-      fieldName,   // optional: field to add comment
-      newComment   // optional: comment text
+      fieldName,
+      newComment
     } = req.body;
 
     const userRole = req.user.role;
@@ -202,10 +258,8 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       existingControl !== undefined || control !== undefined || residualRisk !== undefined ||
       mitigationPlan !== undefined || riskOwner !== undefined;
 
-    // Build updateData
     const updateData = {};
 
-    // ✅ update `.value` for wrapped fields
     if (risks !== undefined) updateData["risks.value"] = risks;
     if (definition !== undefined) updateData["definition.value"] = definition;
     if (category !== undefined) updateData["category.value"] = category;
@@ -220,12 +274,10 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     if (mitigationPlan !== undefined) updateData["mitigationPlan.value"] = mitigationPlan;
     if (riskOwner !== undefined) updateData["riskOwner.value"] = riskOwner;
 
-    // ✅ status/approval fields are plain values
     if (currentStatus) updateData.currentStatus = currentStatus;
     if (approvedBy) updateData.approvedBy = approvedBy;
     if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
 
-    // ✅ Track last edit info
     if ((userRole === "champion" || userRole === "owner" || userRole === "super admin") && isEditingData && lastEditedBy) {
       const now = new Date();
       const day = String(now.getDate()).padStart(2, '0');
@@ -237,25 +289,9 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
         time: now.toLocaleTimeString()
       };
     }
-    // // ✅ Track last edit info (save for any role if provided)
-    // if (lastEditedBy?.email) {
-    //   const now = new Date();
-    //   const day = String(now.getDate()).padStart(2, '0');
-    //   const month = String(now.getMonth() + 1).padStart(2, '0');
-    //   const year = now.getFullYear();
 
-    //   updateData.lastEditedBy = {
-    //     email: lastEditedBy.email,
-    //     date: `${day}/${month}/${year}`,
-    //     time: now.toLocaleTimeString()
-    //   };
-    // }
-
-
-    // Build updateOps
     const updateOps = { $set: updateData };
 
-    // ✅ Handle new comment addition
     if (fieldName && newComment) {
       updateOps.$push = {
         [`${fieldName}.comments`]: {
@@ -266,14 +302,13 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       };
     }
 
-    // Run update
     const updated = await RiskAssessmentData.findByIdAndUpdate(
       req.params.id,
       updateOps,
       { new: true }
     );
 
-    // 🔔 Notification logic
+    // 🔔 Notification & Email Logic (Only on Owner Approve/Reject)
     try {
       const updatedData = await RiskAssessmentData.findById(req.params.id);
       const senderUser = await User.findById(req.user.userId);
@@ -286,54 +321,73 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
         role: "champion"
       });
 
-      const ownerUsers = await User.find({
-        company: senderUser.company,
-        department: senderUser.department,
-        module: senderUser.module,
-        role: "owner"
-      });
-
       let message = null;
       if (approvedBy) {
         message = `Your risk "${updatedData.risks?.value}" was approved by ${senderUser.name} (${senderUser.role}).`;
-      } else if (finalApprovedBy) {
-        message = `Your risk "${updatedData.risks?.value}" received final approval by ${senderUser.name} (${senderUser.role}).`;
       } else if (currentStatus?.toLowerCase().includes("reject")) {
         message = `Your risk "${updatedData.risks?.value}" was rejected by ${senderUser.name} (${senderUser.role}).`;
-      } else if ((userRole === "champion" || userRole === "owner" || userRole === "super admin") && isEditingData) {
-        const now = new Date();
-        const day = String(now.getDate()).padStart(2, '0');
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const year = now.getFullYear();
-        const dateStr = `${day}/${month}/${year}`;
-        const timeStr = now.toLocaleTimeString();
-        message = `${senderUser.name} (${senderUser.role}) edited the risk "${updatedData.risks?.value}" on ${dateStr} at ${timeStr}.`;
       }
 
-      if (message && senderUser) {
-        let recipients = [];
-        if (championUser) recipients.push(championUser);
-        if (ownerUsers.length > 0) recipients.push(...ownerUsers);
-
-        // Avoid sending notification to the sender themselves
-        recipients = recipients.filter(user => user._id.toString() !== senderUser._id.toString());
-
-        const notifications = recipients.map(user => ({
-          recipient: user._id,
+      if (message && senderUser && championUser && championUser.email) {
+        const notification = new Notification({
+          recipient: championUser._id,
           sender: senderUser._id,
           message,
-          forRole: user.role,
-          department: user.department,
-          company: user.company,
-          module: user.module
-        }));
+          forRole: championUser.role,
+          department: senderUser.department,
+          company: senderUser.company,
+          module: senderUser.module
+        });
 
-        if (notifications.length > 0) {
-          await Notification.insertMany(notifications);
-        }
+        await notification.save();
+
+        // ✅ Send Email Notification
+        const mailOptions = {
+          from: process.env.EMAIL_USER,
+          to: championUser.email,
+          subject: '✅ Risk Assessment Data Status Update',
+          html: `
+            <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+              <h2 style="color: #1976d2;">Risk Assessment Data Update</h2>
+              <p>Hello <strong>${championUser.name}</strong>,</p>
+              <p>${message}</p>
+
+              <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                </tr>
+              </table>
+
+              <hr style="margin: 20px 0;" />
+
+              <p style="font-size: 0.9em; color: #555;">
+                Regards,<br/>
+                Your Risk Management System
+              </p>
+            </div>
+          `
+        };
+
+        transporter.sendMail(mailOptions, (error, info) => {
+          if (error) {
+            console.error(`Failed to send email to ${championUser.email}:`, error);
+          } else {
+            console.log(`Email sent to ${championUser.email}: ${info.response}`);
+          }
+        });
       }
+
     } catch (notifErr) {
-      console.error("Error sending notifications:", notifErr);
+      console.error("Error sending approval/rejection notifications/emails:", notifErr);
     }
 
     res.json({ success: true, data: updated });
@@ -343,6 +397,8 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     res.status(500).json({ success: false, message: "Server Error" });
   }
 });
+
+
 
 
 router.post("/add-comment/:id", verifyToken, async (req, res) => {
@@ -374,7 +430,7 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
 
     // Use UTC bounds to avoid timezone off-by-one
     const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0));
-    const end   = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0));
+    const end = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0));
 
     const user = await User.findById(req.user.userId).lean();
 
@@ -384,14 +440,14 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
 
     // Role-based scoping
     if (user.role === "champion") {
-      query.userId = user._id; 
+      query.userId = user._id;
     } else if (["owner", "admin", "super admin"].includes(user.role)) {
       query.company = user.company;
     }
-    
+
 
     const data = await RiskAssessmentData.find(query).lean();
-    
+
 
     if (!data.length) {
       return res.status(404).json({ message: "No data found for this year" });
@@ -447,11 +503,11 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
     const formatComments = (arr) =>
       Array.isArray(arr) && arr.length
         ? arr
-            .map((c) => {
-              const ts = formatCommentDate(c);
-              return ts ? `[${ts}] ${c.text || ""}` : `${c.text || ""}`;
-            })
-            .join("\n")
+          .map((c) => {
+            const ts = formatCommentDate(c);
+            return ts ? `[${ts}] ${c.text || ""}` : `${c.text || ""}`;
+          })
+          .join("\n")
         : "";
 
     data.forEach((rec, i) => {
@@ -475,9 +531,8 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
         riskOwnerComments: formatComments(rec.riskOwner?.comments),
         status: rec.currentStatus || "",
         lastEdit: rec.lastEditedBy
-          ? `${rec.lastEditedBy.email || ""}${
-              rec.lastEditedBy.date ? ", " + rec.lastEditedBy.date : ""
-            }${rec.lastEditedBy.time ? ", " + rec.lastEditedBy.time : ""}`
+          ? `${rec.lastEditedBy.email || ""}${rec.lastEditedBy.date ? ", " + rec.lastEditedBy.date : ""
+          }${rec.lastEditedBy.time ? ", " + rec.lastEditedBy.time : ""}`
           : "Not Edited Yet",
         createdBy: rec.createdBy || "",
         createdAt:
