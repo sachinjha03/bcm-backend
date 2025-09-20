@@ -309,86 +309,102 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
     );
 
     // 🔔 Notification & Email Logic (Only on Owner Approve/Reject)
-    try {
-      const updatedData = await RiskAssessmentData.findById(req.params.id);
-      const senderUser = await User.findById(req.user.userId);
+    // 🔔 Notification & Email Logic (Only on Owner Approve/Reject)
+try {
+  const updatedData = await RiskAssessmentData.findById(req.params.id);
+  const senderUser = await User.findById(req.user.userId);
 
-      const championUser = await User.findOne({
-        email: updatedData.createdBy,
-        company: senderUser.company,
+  // Find the Champion
+  const championUser = await User.findOne({
+    email: updatedData.createdBy,
+    company: senderUser.company,
+    department: senderUser.department,
+    module: senderUser.module,
+    role: "champion"
+  });
+
+  // Find all Super Admins
+  const superAdmins = await User.find({
+    company: senderUser.company,
+    department: senderUser.department,
+    module: senderUser.module,
+    role: "super admin"
+  });
+
+  let message = null;
+  if (approvedBy) {
+    message = `Your risk "${updatedData.risks?.value}" was approved by ${senderUser.name} (${senderUser.role}).`;
+  } else if (currentStatus?.toLowerCase().includes("reject")) {
+    message = `Your risk "${updatedData.risks?.value}" was rejected by ${senderUser.name} (${senderUser.role}).`;
+  }
+
+  if (message && senderUser && championUser) {
+    const recipients = [championUser, ...superAdmins];
+
+    for (const recipient of recipients) {
+      // Create Notification
+      const notification = new Notification({
+        recipient: recipient._id,
+        sender: senderUser._id,
+        message,
+        forRole: recipient.role,
         department: senderUser.department,
-        module: senderUser.module,
-        role: "champion"
+        company: senderUser.company,
+        module: senderUser.module
       });
 
-      let message = null;
-      if (approvedBy) {
-        message = `Your risk "${updatedData.risks?.value}" was approved by ${senderUser.name} (${senderUser.role}).`;
-      } else if (currentStatus?.toLowerCase().includes("reject")) {
-        message = `Your risk "${updatedData.risks?.value}" was rejected by ${senderUser.name} (${senderUser.role}).`;
-      }
+      await notification.save();
 
-      if (message && senderUser && championUser && championUser.email) {
-        const notification = new Notification({
-          recipient: championUser._id,
-          sender: senderUser._id,
-          message,
-          forRole: championUser.role,
-          department: senderUser.department,
-          company: senderUser.company,
-          module: senderUser.module
-        });
+      // Send Email
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: recipient.email,
+        subject: '✅ Risk Assessment Data Status Update',
+        html: `
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <h2 style="color: #1976d2;">Risk Assessment Data Update</h2>
+            <p>Hello <strong>${recipient.name}</strong>,</p>
+            <p>${message}</p>
 
-        await notification.save();
+            <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+              <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+              </tr>
+            </table>
 
-        // ✅ Send Email Notification
-        const mailOptions = {
-          from: process.env.EMAIL_USER,
-          to: championUser.email,
-          subject: '✅ Risk Assessment Data Status Update',
-          html: `
-            <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-              <h2 style="color: #1976d2;">Risk Assessment Data Update</h2>
-              <p>Hello <strong>${championUser.name}</strong>,</p>
-              <p>${message}</p>
+            <hr style="margin: 20px 0;" />
 
-              <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-                <tr>
-                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
-                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
-                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
-                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
-                </tr>
-              </table>
+            <p style="font-size: 0.9em; color: #555;">
+              Regards,<br/>
+              Your Risk Management System
+            </p>
+          </div>
+        `
+      };
 
-              <hr style="margin: 20px 0;" />
-
-              <p style="font-size: 0.9em; color: #555;">
-                Regards,<br/>
-                Your Risk Management System
-              </p>
-            </div>
-          `
-        };
-
-        transporter.sendMail(mailOptions, (error, info) => {
-          if (error) {
-            console.error(`Failed to send email to ${championUser.email}:`, error);
-          } else {
-            console.log(`Email sent to ${championUser.email}: ${info.response}`);
-          }
-        });
-      }
-
-    } catch (notifErr) {
-      console.error("Error sending approval/rejection notifications/emails:", notifErr);
+      transporter.sendMail(mailOptions, (error, info) => {
+        if (error) {
+          console.error(`Failed to send email to ${recipient.email}:`, error);
+        } else {
+          console.log(`Email sent to ${recipient.email}: ${info.response}`);
+        }
+      });
     }
+  }
+
+} catch (notifErr) {
+  console.error("Error sending approval/rejection notifications/emails:", notifErr);
+}
+
 
     res.json({ success: true, data: updated });
 

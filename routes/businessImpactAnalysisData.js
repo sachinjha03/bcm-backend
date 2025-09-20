@@ -28,7 +28,7 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
             formData,
             createdBy,
             userId,
-            currentStatus 
+            currentStatus
         } = req.body;
 
         if (!company || !department || !module || !formData || !createdBy || !userId) {
@@ -215,14 +215,25 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
         }
 
         // 🔔 Notification & Email Logic
+        // 🔔 Notification & Email Logic
         try {
             const updatedData = await BiaData.findById(req.params.id);
             const senderUser = await User.findById(req.user.userId);
+
+            // Find the creator (champion)
             const creatorUser = await User.findOne({
                 email: updatedData.createdBy,
                 company: senderUser.company,
                 department: senderUser.department,
                 module: senderUser.module
+            });
+
+            // Find all super admins
+            const superAdmins = await User.find({
+                company: senderUser.company,
+                department: senderUser.department,
+                module: senderUser.module,
+                role: "super admin"
             });
 
             let message = null;
@@ -232,65 +243,70 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
                 message = `Your BIA entry was rejected by ${senderUser.name} (${senderUser.role}).`;
             }
 
-            if (message && senderUser && creatorUser && creatorUser.email) {
-                // Save Notification in DB
-                await Notification.create({
-                    recipient: creatorUser._id,
-                    sender: senderUser._id,
-                    message,
-                    forRole: creatorUser.role,
-                    department: creatorUser.department,
-                    company: creatorUser.company,
-                    module: creatorUser.module
-                });
+            if (message && senderUser && creatorUser) {
+                const recipients = [creatorUser, ...superAdmins];
 
-                // ✅ Send Email Notification
-                const mailOptions = {
-                    from: process.env.EMAIL_USER,
-                    to: creatorUser.email,
-                    subject: '✅ BIA Data Status Update',
-                    html: `
-                        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                          <h2 style="color: #1976d2;">Business Impact Analysis Update</h2>
-                          <p>Hello <strong>${creatorUser.name}</strong>,</p>
-                          <p>${message}</p>
+                for (const recipient of recipients) {
+                    // Save Notification in DB
+                    await Notification.create({
+                        recipient: recipient._id,
+                        sender: senderUser._id,
+                        message,
+                        forRole: recipient.role,
+                        department: senderUser.department,
+                        company: senderUser.company,
+                        module: senderUser.module
+                    });
 
-                          <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-                            <tr>
-                              <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
-                            </tr>
-                            <tr>
-                              <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
-                            </tr>
-                            <tr>
-                              <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
-                              <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
-                            </tr>
-                          </table>
+                    // ✅ Send Email Notification
+                    const mailOptions = {
+                        from: process.env.EMAIL_USER,
+                        to: recipient.email,
+                        subject: '✅ BIA Data Status Update',
+                        html: `
+                    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                      <h2 style="color: #1976d2;">Business Impact Analysis Update</h2>
+                      <p>Hello <strong>${recipient.name}</strong>,</p>
+                      <p>${message}</p>
 
-                          <hr style="margin: 20px 0;" />
+                      <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                        <tr>
+                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                        </tr>
+                        <tr>
+                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                        </tr>
+                      </table>
 
-                          <p style="font-size: 0.9em; color: #555;">
-                            Regards,<br/>
-                            Your Risk Management System
-                          </p>
-                        </div>
-                    `
-                };
+                      <hr style="margin: 20px 0;" />
 
-                transporter.sendMail(mailOptions, (error, info) => {
-                    if (error) {
-                        console.error(`Failed to send email to ${creatorUser.email}:`, error);
-                    } else {
-                        console.log(`Email sent to ${creatorUser.email}: ${info.response}`);
-                    }
-                });
+                      <p style="font-size: 0.9em; color: #555;">
+                        Regards,<br/>
+                        Your Risk Management System
+                      </p>
+                    </div>
+                `
+                    };
+
+                    transporter.sendMail(mailOptions, (error, info) => {
+                        if (error) {
+                            console.error(`Failed to send email to ${recipient.email}:`, error);
+                        } else {
+                            console.log(`Email sent to ${recipient.email}: ${info.response}`);
+                        }
+                    });
+                }
             }
         } catch (notifErr) {
             console.error("Error sending notification or email:", notifErr);
         }
+
 
         res.json({ success: true, data: updated });
     } catch (err) {

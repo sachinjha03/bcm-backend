@@ -8,7 +8,7 @@ const app = express();
 app.use(express.json())
 // app.use(cors())
 app.use(cors({
-  origin: ["http://localhost:3000", "https://foulath.vercel.app"],
+  origin: ["http://localhost:3000", "https://foulath.vercel.app" , "http://foulathbcm.com" , "https://foulathbcm.com"],
   credentials: true,
 }));
 
@@ -16,7 +16,7 @@ app.use("/api" , require("./routes/users"))
 app.use("/api" , require("./routes/riskAssessmentData"))
 app.use("/api" , require("./routes/businessImpactAnalysisData"))
 app.use("/api" , require("./routes/notification"))
-app.use('/api', require("./routes/uploadBackup"));
+
 
 app.listen(PORT , () => {
     console.log("Backend Started Successfully");
