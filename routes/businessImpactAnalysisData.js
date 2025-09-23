@@ -73,56 +73,56 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
                 await Notification.insertMany(notifications);
 
                 // ✅ Send Email to Each Related User
-                for (const user of relatedUsers) {
-                    if (user.email) {
-                        const mailOptions = {
-                            from: process.env.EMAIL_USER,
-                            to: user.email,
-                            subject: '📊 New BIA Data Submitted',
-                            html: `
-                                <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                                  <h2 style="color: #1976d2;">New Business Impact Analysis Data Submitted</h2>
-                                  <p>Hello <strong>${user.name}</strong>,</p>
-                                  <p>A new BIA data entry has been submitted by <strong>${senderUser.name}</strong>.</p>
+                // for (const user of relatedUsers) {
+                //     if (user.email) {
+                //         const mailOptions = {
+                //             from: process.env.EMAIL_USER,
+                //             to: user.email,
+                //             subject: '📊 New BIA Data Submitted',
+                //             html: `
+                //                 <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                //                   <h2 style="color: #1976d2;">New Business Impact Analysis Data Submitted</h2>
+                //                   <p>Hello <strong>${user.name}</strong>,</p>
+                //                   <p>A new BIA data entry has been submitted by <strong>${senderUser.name}</strong>.</p>
 
-                                  <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-                                    <tr>
-                                      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Message</strong></td>
-                                      <td style="padding: 8px; border: 1px solid #ddd;">New BIA data submitted by ${senderUser.name}</td>
-                                    </tr>
-                                    <tr>
-                                      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
-                                      <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
-                                    </tr>
-                                    <tr>
-                                      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
-                                      <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
-                                    </tr>
-                                    <tr>
-                                      <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
-                                      <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
-                                    </tr>
-                                  </table>
+                //                   <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                //                     <tr>
+                //                       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Message</strong></td>
+                //                       <td style="padding: 8px; border: 1px solid #ddd;">New BIA data submitted by ${senderUser.name}</td>
+                //                     </tr>
+                //                     <tr>
+                //                       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                //                       <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                //                     </tr>
+                //                     <tr>
+                //                       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                //                       <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                //                     </tr>
+                //                     <tr>
+                //                       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                //                       <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                //                     </tr>
+                //                   </table>
 
-                                  <hr style="margin: 20px 0;" />
+                //                   <hr style="margin: 20px 0;" />
 
-                                  <p style="font-size: 0.9em; color: #555;">
-                                    Regards,<br/>
-                                    Your Risk Management System
-                                  </p>
-                                </div>
-                            `
-                        };
+                //                   <p style="font-size: 0.9em; color: #555;">
+                //                     Regards,<br/>
+                //                     Your Risk Management System
+                //                   </p>
+                //                 </div>
+                //             `
+                //         };
 
-                        transporter.sendMail(mailOptions, (error, info) => {
-                            if (error) {
-                                console.error(`Failed to send email to ${user.email}:`, error);
-                            } else {
-                                console.log(`Email sent to ${user.email}: ${info.response}`);
-                            }
-                        });
-                    }
-                }
+                //         transporter.sendMail(mailOptions, (error, info) => {
+                //             if (error) {
+                //                 console.error(`Failed to send email to ${user.email}:`, error);
+                //             } else {
+                //                 console.log(`Email sent to ${user.email}: ${info.response}`);
+                //             }
+                //         });
+                //     }
+                // }
             }
         } catch (err) {
             console.error("Error creating notifications and sending emails for BIA:", err);
