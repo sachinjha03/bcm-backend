@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
 const BIAHeaderCommentSchema = new Schema({
-  fieldName: { type: String, required: true }, // e.g. "Impact To Company"
+  fieldName: { type: String, required: true }, 
   comments: [
     {
       text: { type: String, required: true },

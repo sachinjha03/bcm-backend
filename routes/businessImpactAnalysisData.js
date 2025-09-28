@@ -3,11 +3,20 @@ const router = express.Router();
 const BiaData = require('../models/BusinessImpactAnalysisData');
 const verifyToken = require('../middleware/verifyToken');
 const User = require('../models/User');
-const Notification = require('../models/Notification'); // ✅ Add this
+const Notification = require('../models/Notification');
 const ExcelJS = require("exceljs");
 const archiver = require("archiver");
-const transporter = require("../config/emailConfig")
+const transporter = require("../config/emailConfig");
+const mongoose = require('mongoose');
 
+// Schema to track champion submissions count per company and module for BIA
+const BIAChampionSubmissionCounterSchema = new mongoose.Schema({
+  company: { type: String, required: true },
+  module: { type: String, required: true },
+  biaSubmissionCount: { type: Number, default: 0 },
+}, { unique: true, indexes: [{ key: { company: 1, module: 1 } }] });
+
+const BIAChampionSubmissionCounter = mongoose.model('BIAChampionSubmissionCounter', BIAChampionSubmissionCounterSchema);
 
 // Utility to generate a unique dataId
 const generateDataId = (length = 8) => {
@@ -35,6 +44,9 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
             return res.status(400).json({ message: 'Missing required fields' });
         }
 
+        const senderUser = await User.findById(req.user.userId);
+        const isChampion = senderUser.role === 'champion';
+
         const newEntry = new BiaData({
             dataId: generateDataId(),
             company,
@@ -48,10 +60,18 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
 
         const saved = await newEntry.save();
 
-        // ✅ Notifications + Emails
-        try {
-            const senderUser = await User.findById(req.user.userId);
+        let championSubmissionsCount = 0;
+        if (isChampion) {
+            const counter = await BIAChampionSubmissionCounter.findOneAndUpdate(
+                { company: senderUser.company, module: senderUser.module },
+                { $set: { module: senderUser.module }, $inc: { biaSubmissionCount: 1 } },
+                { upsert: true, new: true }
+            );
+            championSubmissionsCount = counter.biaSubmissionCount;
+        }
 
+        // Notifications + Emails
+        try {
             if (senderUser) {
                 const relatedUsers = await User.find({
                     company: senderUser.company,
@@ -72,57 +92,64 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
 
                 await Notification.insertMany(notifications);
 
-                // ✅ Send Email to Each Related User
-                // for (const user of relatedUsers) {
-                //     if (user.email) {
-                //         const mailOptions = {
-                //             from: process.env.EMAIL_USER,
-                //             to: user.email,
-                //             subject: '📊 New BIA Data Submitted',
-                //             html: `
-                //                 <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                //                   <h2 style="color: #1976d2;">New Business Impact Analysis Data Submitted</h2>
-                //                   <p>Hello <strong>${user.name}</strong>,</p>
-                //                   <p>A new BIA data entry has been submitted by <strong>${senderUser.name}</strong>.</p>
+                // Send email to owners if champion and count reaches multiple of 10
+                if (isChampion && championSubmissionsCount > 0 && championSubmissionsCount % 10 === 0) {
+                    const owners = await User.find({
+                        company: senderUser.company,
+                        role: 'owner'
+                    });
 
-                //                   <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-                //                     <tr>
-                //                       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Message</strong></td>
-                //                       <td style="padding: 8px; border: 1px solid #ddd;">New BIA data submitted by ${senderUser.name}</td>
-                //                     </tr>
-                //                     <tr>
-                //                       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
-                //                       <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
-                //                     </tr>
-                //                     <tr>
-                //                       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
-                //                       <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
-                //                     </tr>
-                //                     <tr>
-                //                       <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
-                //                       <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
-                //                     </tr>
-                //                   </table>
+                    for (const owner of owners) {
+                        if (owner.email) {
+                            const mailOptions = {
+                                from: process.env.EMAIL_USER,
+                                to: owner.email,
+                                subject: '🛡️ Milestone: 10 New BIA Submissions',
+                                html: `
+                                    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                                      <h2 style="color: #1976d2;">Milestone Reached: New BIA Submissions</h2>
+                                      <p>Hello <strong>${owner.name}</strong>,</p>
+                                      <p>A total of ${championSubmissionsCount} Business Impact Analysis submissions have been made by champions in your company for module ${senderUser.module}.</p>
+                                      <p>The latest submission was made by <strong>${senderUser.name}</strong>.</p>
+                                      <p>Visit our Business Continuity Management platform to review the details:</p>
+                                      <p><a href="https://foulathbcm.com/" style="color: #1976d2; text-decoration: none;">https://foulathbcm.com/</a></p>
+                                      <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                                        <tr>
+                                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Message</strong></td>
+                                          <td style="padding: 8px; border: 1px solid #ddd;">${championSubmissionsCount} BIA submissions by champions</td>
+                                        </tr>
+                                        <tr>
+                                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                                        </tr>
+                                        <tr>
+                                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                                        </tr>
+                                        <tr>
+                                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                                        </tr>
+                                      </table>
+                                      <hr style="margin: 20px 0;" />
+                                      <p style="font-size: 0.9em; color: #555;">
+                                        Regards,<br/>
+                                        Your Risk Management System
+                                      </p>
+                                    </div>
+                                `
+                            };
 
-                //                   <hr style="margin: 20px 0;" />
-
-                //                   <p style="font-size: 0.9em; color: #555;">
-                //                     Regards,<br/>
-                //                     Your Risk Management System
-                //                   </p>
-                //                 </div>
-                //             `
-                //         };
-
-                //         transporter.sendMail(mailOptions, (error, info) => {
-                //             if (error) {
-                //                 console.error(`Failed to send email to ${user.email}:`, error);
-                //             } else {
-                //                 console.log(`Email sent to ${user.email}: ${info.response}`);
-                //             }
-                //         });
-                //     }
-                // }
+                            transporter.sendMail(mailOptions, (error, info) => {
+                                if (error) {
+                                    console.error(`Failed to send email to ${owner.email}:`, error);
+                                } else {
+                                    console.log(`Email sent to ${owner.email}: ${info.response}`);
+                                }
+                            });
+                        }
+                    }
+                }
             }
         } catch (err) {
             console.error("Error creating notifications and sending emails for BIA:", err);
@@ -136,23 +163,20 @@ router.post('/add-business-impact-analysis-data', verifyToken, async (req, res) 
     }
 });
 
-
-
 // DELETE THE BUSINESS IMPACT ANALYSIS DATA
 router.delete("/delete-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
     try {
-        const id = req.params.id
-        const isDataExist = await BiaData.findById(id)
+        const id = req.params.id;
+        const isDataExist = await BiaData.findById(id);
         if (!isDataExist) {
             return res.status(404).json({ success: false, reason: "Data Doesn't Exist" });
         }
-        const response = await BiaData.findByIdAndDelete(id)
-        res.status(200).json({ success: true, data: response })
+        const response = await BiaData.findByIdAndDelete(id);
+        res.status(200).json({ success: true, data: response });
     } catch (err) {
-        res.status(400).json({ success: false, reason: err })
+        res.status(400).json({ success: false, reason: err });
     }
-})
-
+});
 
 // PUT /api/update-business-impact-analysis-data/:id
 router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
@@ -214,8 +238,7 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
             return res.status(404).json({ success: false, message: "Data not found" });
         }
 
-        // 🔔 Notification & Email Logic
-        // 🔔 Notification & Email Logic
+        // Notification & Email Logic
         try {
             const updatedData = await BiaData.findById(req.params.id);
             const senderUser = await User.findById(req.user.userId);
@@ -258,40 +281,37 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
                         module: senderUser.module
                     });
 
-                    // ✅ Send Email Notification
+                    // Send Email Notification
                     const mailOptions = {
                         from: process.env.EMAIL_USER,
                         to: recipient.email,
                         subject: '✅ BIA Data Status Update',
                         html: `
-                    <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-                      <h2 style="color: #1976d2;">Business Impact Analysis Update</h2>
-                      <p>Hello <strong>${recipient.name}</strong>,</p>
-                      <p>${message}</p>
-
-                      <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-                        <tr>
-                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
-                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
-                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
-                          <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
-                        </tr>
-                      </table>
-
-                      <hr style="margin: 20px 0;" />
-
-                      <p style="font-size: 0.9em; color: #555;">
-                        Regards,<br/>
-                        Your Risk Management System
-                      </p>
-                    </div>
-                `
+                            <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                              <h2 style="color: #1976d2;">Business Impact Analysis Update</h2>
+                              <p>Hello <strong>${recipient.name}</strong>,</p>
+                              <p>${message}</p>
+                              <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                                <tr>
+                                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                                </tr>
+                                <tr>
+                                  <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                                  <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                                </tr>
+                              </table>
+                              <hr style="margin: 20px 0;" />
+                              <p style="font-size: 0.9em; color: #555;">
+                                Regards,<br/>
+                                Your Risk Management System
+                              </p>
+                            </div>
+                        `
                     };
 
                     transporter.sendMail(mailOptions, (error, info) => {
@@ -307,15 +327,12 @@ router.put("/update-business-impact-analysis-data/:id", verifyToken, async (req,
             console.error("Error sending notification or email:", notifErr);
         }
 
-
         res.json({ success: true, data: updated });
     } catch (err) {
         console.error("Update BIA error:", err);
         res.status(500).json({ success: false, message: "Server Error" });
     }
 });
-
-
 
 // GET data for a user
 router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
@@ -334,7 +351,6 @@ router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, r
                 company: user.company,
                 department: user.department,
                 module: user.module,
-                // createdBy: { $ne: user.email }
             }).populate('userId', 'name email role department company');
         } else {
             data = await BiaData.find({ userId })
@@ -349,14 +365,13 @@ router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, r
     }
 });
 
-
 router.post("/add-comment/:id", verifyToken, async (req, res) => {
-    const { fieldName, text } = req.body;  // fieldName like "risks" or "definition"
+    const { fieldName, text } = req.body;
     try {
-        const comment = { text, author: req.user.userId };
-        const updated = await RiskAssessmentData.findByIdAndUpdate(
+        const comment = { text, author: req.user.userId, date: new Date() };
+        const updated = await BiaData.findByIdAndUpdate(
             req.params.id,
-            { $push: { [`${fieldName}.comments`]: comment } },
+            { $push: { [`formData.${fieldName}.comments`]: comment } },
             { new: true }
         );
         res.json({ success: true, data: updated });
@@ -365,11 +380,7 @@ router.post("/add-comment/:id", verifyToken, async (req, res) => {
     }
 });
 
-
-
-
-
-// 📌 Helper: format comments into readable text
+// format comments into readable text
 const formatComments = (arr) =>
     (arr || [])
         .map(
@@ -380,7 +391,7 @@ const formatComments = (arr) =>
         )
         .join("\n");
 
-// 📌 DOWNLOAD BIA DATA AS ZIP
+// DOWNLOAD BIA DATA AS ZIP
 router.get("/download-bia/:year", verifyToken, async (req, res) => {
     try {
         const year = parseInt(req.params.year, 10);
@@ -433,22 +444,18 @@ router.get("/download-bia/:year", verifyToken, async (req, res) => {
         ];
 
         // Dynamic columns
-        // Dynamic columns
         allFields.forEach((field) => {
-            // For value
             columns.push({
-                header: field.replace(/_/g, " "), // remove underscores in display
+                header: field.replace(/_/g, " "),
                 key: `${field}_value`,
                 width: 30,
             });
-            // For comments
             columns.push({
-                header: `${field.replace(/_/g, " ")} Comments`, // remove underscores
+                header: `${field.replace(/_/g, " ")} Comments`,
                 key: `${field}_comments`,
                 width: 40,
             });
         });
-
 
         sheet.columns = columns;
 
@@ -464,7 +471,6 @@ router.get("/download-bia/:year", verifyToken, async (req, res) => {
             };
 
             if (rec.formData) {
-                // Handle Map
                 if (rec.formData instanceof Map) {
                     rec.formData.forEach((val, key) => {
                         if (val && typeof val === "object" && "value" in val) {
@@ -475,9 +481,7 @@ router.get("/download-bia/:year", verifyToken, async (req, res) => {
                             rowObj[`${key}_comments`] = "";
                         }
                     });
-                }
-                // Handle Object
-                else if (typeof rec.formData === "object") {
+                } else if (typeof rec.formData === "object") {
                     Object.entries(rec.formData).forEach(([key, val]) => {
                         if (val && typeof val === "object" && "value" in val) {
                             rowObj[`${key}_value`] = val.value || "";
@@ -493,17 +497,14 @@ router.get("/download-bia/:year", verifyToken, async (req, res) => {
             sheet.addRow(rowObj);
         });
 
-        // Wrap text & align top
         sheet.eachRow((row) => {
             row.eachCell((cell) => {
                 cell.alignment = { wrapText: true, vertical: "top" };
             });
         });
 
-        // Generate Excel buffer
         const buffer = await workbook.xlsx.writeBuffer();
 
-        // Create zip
         res.setHeader("Content-Type", "application/zip");
         res.setHeader("Content-Disposition", `attachment; filename=BIA_Data_${year}.zip`);
 
@@ -517,47 +518,4 @@ router.get("/download-bia/:year", verifyToken, async (req, res) => {
     }
 });
 
-
-
-
-
-
-
 module.exports = router;
-
-
-// READ BUSINESS IMPACT ANALYSIS DATA FOR A PARTICULAR USER
-// router.get("/read-business-impact-analysis-data/:id", verifyToken, async (req, res) => {
-//     try {
-//         const userId = req.params.id;
-
-//         const data = await BiaData.find({
-//             $or: [
-//                 { userId },
-//                 { company: req.user.company, department: req.user.department, module: req.user.module }
-//             ]
-//         });
-
-//         res.status(200).json({ success: true, data });
-//     } catch (error) {
-//         console.error("Fetch error:", error);
-//         res.status(500).json({ success: false, message: "Server error" });
-//     }
-// });
-
-// // READ BUSINESS IMPACT ANALYSIS DATA CREATED BY LOGGED-IN USER
-// router.get("/read-business-impact-analysis-data", verifyToken, async (req, res) => {
-//   try {
-//     const loggedInUserId = req.user._id || req.user.id; // based on your JWT token structure
-
-//     const data = await BiaData.find({ userId: loggedInUserId });
-
-//     res.status(200).json({ success: true, data });
-//   } catch (error) {
-//     console.error("Fetch error:", error);
-//     res.status(500).json({ success: false, message: "Server error" });
-//   }
-// });
-
-
-

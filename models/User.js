@@ -5,7 +5,6 @@ const UserScheme = new mongoose.Schema({
     name: String,
     email: {
         type: String,
-        // unique: true, // this creates a unique index
         required: true,
     },
     password: String,

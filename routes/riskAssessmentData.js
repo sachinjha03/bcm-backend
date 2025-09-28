@@ -5,11 +5,17 @@ const RiskAssessmentData = require('../models/RiskAssessmentData');
 const User = require('../models/User');
 const verifyToken = require("../middleware/verifyToken")
 const Notification = require('../models/Notification');
-
+const mongoose = require('mongoose');
 const ExcelJS = require("exceljs");
 const archiver = require("archiver");
 
 
+const ChampionSubmissionCounterSchema = new mongoose.Schema({
+  company: { type: String, required: true, unique: true },
+  submissionCount: { type: Number, default: 0 }
+});
+
+const ChampionSubmissionCounter = mongoose.model('ChampionSubmissionCounter', ChampionSubmissionCounterSchema);
 
 // Utility to generate a unique dataId
 const generateDataId = (length = 8) => {
@@ -22,8 +28,6 @@ const generateDataId = (length = 8) => {
 };
 
 // POST: Add new risk assessment data
-
-
 router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
   const {
     risks,
@@ -48,6 +52,12 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
   } = req.body;
 
   try {
+    const senderUser = await User.findById(req.user.userId);
+    
+    // Check if the user is a champion
+    const isChampion = senderUser.role === 'champion';
+
+    // Create new risk assessment data
     const newData = new RiskAssessmentData({
       dataId: generateDataId(),
       risks: { value: risks, comments: [] },
@@ -73,9 +83,21 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
 
     const response = await newData.save();
 
-    try {
-      const senderUser = await User.findById(req.user.userId);
+    // Update champion submission counter if the user is a champion
+    let championSubmissionsCount = 0;
+    if (isChampion) {
+      const counter = await ChampionSubmissionCounter.findOneAndUpdate(
+        { company: senderUser.company },
+        { $inc: { submissionCount: 1 } },
+        { upsert: true, new: true }
+      );
+      championSubmissionsCount = counter.submissionCount;
+    }
+    console.log(championSubmissionsCount);
+    
 
+    // Create notifications for related users
+    try {
       if (senderUser) {
         const relatedUsers = await User.find({
           company: senderUser.company,
@@ -96,62 +118,67 @@ router.post('/add-risk-assessment-data', verifyToken, async (req, res) => {
 
         await Notification.insertMany(notifications);
 
-        // ✅ Send Email Notifications
-        // for (const user of relatedUsers) {
-        //   if (user.email) {
-        //     const mailOptions = {
-        //       from: process.env.EMAIL_USER,
-        //       to: user.email,
-        //       subject: '🛡️ New Risk Assessment Data Submitted',
-        //       html: `
-        //       <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-        //         <h2 style="color: #1976d2;">New Risk Assessment Data Submitted</h2>
-        //         <p>Hello <strong>${user.name}</strong>,</p>
+        // Send email notification to owners if champion and count reaches multiple of 10
+        if (isChampion && championSubmissionsCount > 0 && championSubmissionsCount % 10 === 0) {
+          const owners = await User.find({
+            company: senderUser.company,
+            role: 'owner'
+          });
 
-        //         <p>A new risk assessment has been submitted by <strong>${senderUser.name}</strong>.</p>
+          for (const owner of owners) {
+            if (owner.email) {
+              const mailOptions = {
+                from: process.env.EMAIL_USER,
+                to: owner.email,
+                subject: '🛡️ Milestone: 10 New Risk Assessments Submitted',
+                html: `
+                  <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+                    <h2 style="color: #1976d2;">Milestone Reached: New Risk Assessments</h2>
+                    <p>Hello <strong>${owner.name}</strong>,</p>
+                    <p>A total of ${championSubmissionsCount} risk assessments have been submitted by champions in your company.</p>
+                    <p>The latest submission was made by <strong>${senderUser.name}</strong>.</p>
+                    <p>Visit our Business Continuity Management platform to review the details:</p>
+                    <p><a href="https://foulathbcm.com/" style="color: #1976d2; text-decoration: none;">https://foulathbcm.com/</a></p>
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+                      <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Message</strong></td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${championSubmissionsCount} risk assessments submitted by champions</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
+                        <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
+                      </tr>
+                    </table>
+                    <hr style="margin: 20px 0;" />
+                    <p style="font-size: 0.9em; color: #555;">
+                      Regards,<br/>
+                      Your Risk Management System
+                    </p>
+                  </div>
+                `
+              };
 
-        //         <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-        //           <tr>
-        //             <td style="padding: 8px; border: 1px solid #ddd;"><strong>Message</strong></td>
-        //             <td style="padding: 8px; border: 1px solid #ddd;">New risk data submitted by ${senderUser.name}</td>
-        //           </tr>
-        //           <tr>
-        //             <td style="padding: 8px; border: 1px solid #ddd;"><strong>Company</strong></td>
-        //             <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.company}</td>
-        //           </tr>
-        //           <tr>
-        //             <td style="padding: 8px; border: 1px solid #ddd;"><strong>Department</strong></td>
-        //             <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.department}</td>
-        //           </tr>
-        //           <tr>
-        //             <td style="padding: 8px; border: 1px solid #ddd;"><strong>Module</strong></td>
-        //             <td style="padding: 8px; border: 1px solid #ddd;">${senderUser.module}</td>
-        //           </tr>
-        //         </table>
-
-        //         <hr style="margin: 20px 0;" />
-
-        //         <p style="font-size: 0.9em; color: #555;">
-        //           Regards,<br/>
-        //           Your Risk Management System
-        //         </p>
-        //       </div>
-        //        `
-        //     };
-
-
-        //     transporter.sendMail(mailOptions, (error, info) => {
-        //       if (error) {
-        //         console.error(`Failed to send email to ${user.email}:`, error);
-        //       } else {
-        //         console.log(`Email sent to ${user.email}: ${info.response}`);
-        //       }
-        //     });
-        //   }
-        // }
+              transporter.sendMail(mailOptions, (error, info) => {
+                if (error) {
+                  console.error(`Failed to send email to ${owner.email}:`, error);
+                } else {
+                  console.log(`Email sent to ${owner.email}: ${info.response}`);
+                }
+              });
+            }
+          }
+        }
       }
     } catch (err) {
-      console.error("Error creating notifications and sending emails:", err);
+      console.error("Error creating notifications or sending emails:", err);
     }
 
     res.status(200).json({ success: true, data: response });
@@ -187,13 +214,10 @@ router.get('/read-risk-assessment-data/:userId', verifyToken, async (req, res) =
     let response;
 
     if (user.role === "owner" || user.role === "admin" || user.role === "super admin") {
-      // Fetch all records with same company and department
       response = await RiskAssessmentData.find({
         company: user.company,
-        // createdBy: { $ne: user.email }, 
       }).populate('userId', 'name email role department company');
     } else {
-      // Fetch only their own records
       response = await RiskAssessmentData.find({ userId })
         .populate('userId', 'name email role department company');
     }
@@ -307,9 +331,6 @@ router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => 
       updateOps,
       { new: true }
     );
-
-    // 🔔 Notification & Email Logic (Only on Owner Approve/Reject)
-    // 🔔 Notification & Email Logic (Only on Owner Approve/Reject)
 try {
   const updatedData = await RiskAssessmentData.findById(req.params.id);
   const senderUser = await User.findById(req.user.userId);
@@ -342,7 +363,6 @@ try {
     const recipients = [championUser, ...superAdmins];
 
     for (const recipient of recipients) {
-      // Create Notification
       const notification = new Notification({
         recipient: recipient._id,
         sender: senderUser._id,
@@ -418,7 +438,7 @@ try {
 
 
 router.post("/add-comment/:id", verifyToken, async (req, res) => {
-  const { fieldName, text } = req.body;  // fieldName like "risks" or "definition"
+  const { fieldName, text } = req.body; 
   try {
     const comment = { text, author: req.user.userId };
     const updated = await RiskAssessmentData.findByIdAndUpdate(
@@ -433,8 +453,6 @@ router.post("/add-comment/:id", verifyToken, async (req, res) => {
 });
 
 
-// DOWNLOAD DATA (RA)
-// -------------------
 
 // GET /api/download-risk-assessment/:year
 router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
@@ -443,18 +461,12 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
     if (!Number.isInteger(year)) {
       return res.status(400).json({ message: "Invalid year" });
     }
-
-    // Use UTC bounds to avoid timezone off-by-one
     const start = new Date(Date.UTC(year, 0, 1, 0, 0, 0));
     const end = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0));
 
     const user = await User.findById(req.user.userId).lean();
-
-    // Base query: by creation date
     const query = { dateOfCreation: { $gte: start, $lt: end } };
 
-
-    // Role-based scoping
     if (user.role === "champion") {
       query.userId = user._id;
     } else if (["owner", "admin", "super admin"].includes(user.role)) {
@@ -498,7 +510,6 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
     ];
 
     const formatCommentDate = (c) => {
-      // c.date may be Date, ISO string, or already "dd/mm/yy hh:mm:ss"
       let dateStr = "";
       if (c?.date instanceof Date) {
         dateStr =
@@ -506,10 +517,9 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
       } else if (typeof c?.date === "string") {
         const d = new Date(c.date);
         dateStr = isNaN(d)
-          ? c.date // fallback to stored string
+          ? c.date
           : d.toLocaleDateString("en-GB") + " " + d.toLocaleTimeString();
       }
-      // If explicit time exists, include it (avoid duplicating)
       if (c?.time && typeof c.time === "string" && !dateStr.includes(c.time)) {
         dateStr = `${dateStr ? dateStr + " " : ""}${c.time}`;
       }
@@ -557,7 +567,6 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
             : rec.dateOfCreation || "",
       });
 
-      // Wrap text so long comments auto-expand row height
       row.eachCell((cell) => {
         cell.alignment = { wrapText: true, vertical: "top" };
       });
@@ -565,7 +574,6 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
 
     const buffer = await workbook.xlsx.writeBuffer();
 
-    // Zip and stream to client
     res.setHeader("Content-Type", "application/zip");
     res.setHeader(
       "Content-Disposition",
@@ -575,7 +583,6 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
     const archive = archiver("zip", { zlib: { level: 9 } });
     archive.on("error", (err) => {
       console.error("Zip error:", err);
-      // Important: only send if headers not sent
       if (!res.headersSent) {
         res.status(500).json({ message: "Failed to generate zip" });
       }
@@ -593,43 +600,5 @@ router.get("/download-risk-assessment/:year", verifyToken, async (req, res) => {
 });
 
 
-
-
-
 module.exports = router;
-
-
-
-
-
-
-
-
-
-// Update Risk Assessment Data
-// router.put("/update-risk-assessment-data/:id", verifyToken, async (req, res) => {
-//   try {
-//     const {risks,definition,category,likelihood,impact,riskScore,existingControl,control,residualRisk,mitigationPlan,riskOwner,currentStatus,lastEditedBy,approvedBy,finalApprovedBy} = req.body;
-
-//     const updateData = {
-//       risks,definition,category,likelihood,impact,riskScore,existingControl,control,residualRisk,mitigationPlan,riskOwner,currentStatus,lastEditedBy,};
-
-//     if (approvedBy) updateData.approvedBy = approvedBy;
-//     if (finalApprovedBy) updateData.finalApprovedBy = finalApprovedBy;
-
-//     const updated = await RiskAssessmentData.findByIdAndUpdate(
-//       req.params.id,
-//       { $set: updateData },
-//       { new: true }
-//     );
-
-//     res.json({ success: true, data: updated });
-//   } catch (err) {
-//     console.error("Update error:", err);
-//     res.status(500).json({ success: false, message: "Server Error" });
-//   }
-// });
-
-
-
 

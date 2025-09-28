@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const { Schema } = mongoose;
 
 const fieldWithCommentsSchema = new Schema({
-  value: { type: Schema.Types.Mixed }, // can be string, number, etc
+  value: { type: Schema.Types.Mixed }, 
   comments: [
     {
       text: String,
